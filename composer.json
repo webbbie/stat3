@@ -1,0 +1,22 @@
+{
+  "name": "christianbayer/pixl-sql-tracker",
+  "description": "Self-hosted PHP/MySQL analytics tracker with bot-aware dashboard and browser notifications.",
+  "type": "project",
+  "license": "MIT",
+  "require": {
+    "php": ">=7.4",
+    "ext-pdo": "*"
+  },
+  "scripts": {
+    "lint": [
+      "php -l pixl_server.php",
+      "php -l pixl_collect.php",
+      "php -l pixl_stats.php",
+      "php -l pixel_stats2.php",
+      "php -l pixl_setup_check.php",
+      "php -l pixl_config.example.php",
+      "php -l pixl_config.ionos.example.php",
+      "node --check pixel_webpush_sw.js"
+    ]
+  }
+}

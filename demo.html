@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Pixl SQL Tracker Demo</title>
+  <script src="./pixl6.js" defer></script>
+  <style>
+    body {
+      margin: 0;
+      font: 16px/1.5 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      color: #17202a;
+      background: #f4f6f8;
+    }
+    main {
+      width: min(760px, calc(100vw - 32px));
+      margin: 56px auto;
+      padding: 24px;
+      border: 1px solid #d8dee8;
+      border-radius: 8px;
+      background: #fff;
+    }
+    code {
+      display: inline-block;
+      padding: 2px 6px;
+      border-radius: 4px;
+      background: #eef2f6;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Pixl SQL Tracker Demo</h1>
+    <p>
+      This page loads <code>pixl6.js</code>. Open DevTools, interact with the
+      page, then leave or reload it to trigger a final analytics event.
+    </p>
+    <p>
+      Dashboard: <code>pixl_stats.php</code>
+    </p>
+  </main>
+  <noscript>
+    <img src="./pixl_collect.php?pixel=1" width="1" height="1" alt="">
+  </noscript>
+</body>
+</html>
