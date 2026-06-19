@@ -1,0 +1,553 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>Stats3 File Index</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: #f3f5f7;
+      --surface: #ffffff;
+      --surface-2: #f8fafb;
+      --ink: #172126;
+      --muted: #66747c;
+      --line: #d9e0e4;
+      --accent: #087f73;
+      --accent-soft: #e2f4f0;
+      --blue: #3568a8;
+      --blue-soft: #e7eef8;
+      --amber: #9b6312;
+      --amber-soft: #fbf0d8;
+      --red: #a43f4e;
+      --red-soft: #f9e8eb;
+      --gray-soft: #edf0f2;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #151a1d;
+        --surface: #1e2529;
+        --surface-2: #192025;
+        --ink: #eef3f4;
+        --muted: #a6b1b6;
+        --line: #354047;
+        --accent: #54c8b8;
+        --accent-soft: #203b37;
+        --blue: #82aee3;
+        --blue-soft: #24364b;
+        --amber: #e2b562;
+        --amber-soft: #3a3020;
+        --red: #e497a3;
+        --red-soft: #42282e;
+        --gray-soft: #293136;
+      }
+    }
+
+    * {
+      box-sizing: border-box;
+      letter-spacing: 0;
+    }
+
+    body {
+      min-width: 320px;
+      margin: 0;
+      color: var(--ink);
+      background: var(--bg);
+      font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    a {
+      color: var(--accent);
+      text-decoration-thickness: 1px;
+      text-underline-offset: 3px;
+    }
+
+    .topbar {
+      border-bottom: 1px solid var(--line);
+      background: var(--surface);
+    }
+
+    .topbar-inner,
+    main,
+    footer {
+      width: min(1280px, 100%);
+      margin-inline: auto;
+      padding-inline: clamp(16px, 3vw, 32px);
+    }
+
+    .topbar-inner {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 20px;
+      align-items: center;
+      min-height: 112px;
+      padding-block: 18px;
+    }
+
+    .eyebrow {
+      margin: 0 0 4px;
+      color: var(--accent);
+      font-size: 12px;
+      font-weight: 800;
+      text-transform: uppercase;
+    }
+
+    h1,
+    h2,
+    p {
+      margin: 0;
+    }
+
+    h1 {
+      font-size: clamp(24px, 4vw, 36px);
+      line-height: 1.1;
+    }
+
+    .summary {
+      margin-top: 7px;
+      color: var(--muted);
+      font-weight: 650;
+    }
+
+    .quick-links {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
+
+    .quick-links a {
+      min-height: 38px;
+      display: inline-flex;
+      align-items: center;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 8px 11px;
+      color: var(--ink);
+      background: var(--surface-2);
+      font-weight: 750;
+      text-decoration: none;
+    }
+
+    .quick-links a:hover {
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+
+    main {
+      padding-block: 20px 38px;
+    }
+
+    .toolbar {
+      display: grid;
+      grid-template-columns: minmax(220px, 1fr) auto;
+      gap: 12px;
+      align-items: center;
+      margin-bottom: 16px;
+    }
+
+    .search {
+      display: grid;
+      gap: 5px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 750;
+    }
+
+    .search input {
+      width: 100%;
+      min-height: 42px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 9px 12px;
+      color: var(--ink);
+      background: var(--surface);
+      font: inherit;
+    }
+
+    .segments {
+      display: flex;
+      gap: 4px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      padding: 4px;
+      background: var(--surface);
+    }
+
+    .segments button {
+      min-height: 32px;
+      border: 0;
+      border-radius: 4px;
+      padding: 6px 9px;
+      color: var(--muted);
+      background: transparent;
+      font: inherit;
+      font-size: 12px;
+      font-weight: 750;
+      cursor: pointer;
+    }
+
+    .segments button[aria-pressed="true"] {
+      color: #ffffff;
+      background: var(--accent);
+    }
+
+    .file-table {
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--surface);
+    }
+
+    .table-head,
+    .file-row {
+      display: grid;
+      grid-template-columns: minmax(240px, 2fr) minmax(200px, 1.4fr) 110px 72px;
+      gap: 16px;
+      align-items: center;
+      padding: 10px 14px;
+    }
+
+    .table-head {
+      min-height: 42px;
+      color: var(--muted);
+      background: var(--surface-2);
+      font-size: 11px;
+      font-weight: 850;
+      text-transform: uppercase;
+    }
+
+    .file-group + .file-group {
+      border-top: 1px solid var(--line);
+    }
+
+    .group-title {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      min-height: 44px;
+      padding: 9px 14px;
+      border-bottom: 1px solid var(--line);
+      background: var(--surface-2);
+    }
+
+    .group-title h2 {
+      font-size: 13px;
+    }
+
+    .group-title span {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .file-row {
+      min-height: 52px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .file-row:last-child {
+      border-bottom: 0;
+    }
+
+    .file-row:hover {
+      background: var(--surface-2);
+    }
+
+    .file-name {
+      min-width: 0;
+      overflow-wrap: anywhere;
+      font-family: ui-monospace, "SFMono-Regular", Consolas, monospace;
+      font-size: 13px;
+      font-weight: 700;
+    }
+
+    .file-name a {
+      color: var(--ink);
+    }
+
+    .file-name a:hover {
+      color: var(--accent);
+    }
+
+    .role {
+      color: var(--muted);
+      overflow-wrap: anywhere;
+    }
+
+    .status {
+      width: fit-content;
+      min-height: 24px;
+      display: inline-flex;
+      align-items: center;
+      border-radius: 4px;
+      padding: 3px 7px;
+      font-size: 11px;
+      font-weight: 850;
+    }
+
+    .status.active { color: var(--accent); background: var(--accent-soft); }
+    .status.docs { color: var(--blue); background: var(--blue-soft); }
+    .status.legacy { color: var(--amber); background: var(--amber-soft); }
+    .status.private { color: var(--red); background: var(--red-soft); }
+    .status.project { color: var(--muted); background: var(--gray-soft); }
+
+    .mode {
+      color: var(--muted);
+      font-family: ui-monospace, "SFMono-Regular", Consolas, monospace;
+      font-size: 12px;
+      text-align: right;
+    }
+
+    .empty {
+      margin-top: 16px;
+      padding: 18px;
+      border: 1px dashed var(--line);
+      border-radius: 8px;
+      color: var(--muted);
+      text-align: center;
+    }
+
+    footer {
+      padding-block: 18px 26px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    :focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 2px;
+    }
+
+    @media (max-width: 860px) {
+      .topbar-inner,
+      .toolbar {
+        grid-template-columns: 1fr;
+      }
+
+      .quick-links,
+      .segments {
+        justify-content: flex-start;
+      }
+
+      .table-head {
+        display: none;
+      }
+
+      .file-row {
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 6px 12px;
+      }
+
+      .role {
+        grid-column: 1 / -1;
+        grid-row: 2;
+      }
+
+      .status {
+        grid-column: 2;
+        grid-row: 1;
+      }
+
+      .mode {
+        grid-column: 2;
+        grid-row: 2;
+      }
+    }
+
+    @media (max-width: 520px) {
+      .topbar-inner,
+      main,
+      footer {
+        padding-inline: 12px;
+      }
+
+      .quick-links a {
+        flex: 1 1 auto;
+        justify-content: center;
+      }
+
+      .segments {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+      }
+
+      .file-row {
+        padding-inline: 10px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <div>
+        <p class="eyebrow">Stats3</p>
+        <h1>File Index</h1>
+        <p class="summary"><span id="visibleCount">42</span> of <span id="totalCount">42</span> files</p>
+      </div>
+      <nav class="quick-links" aria-label="Primary dashboards">
+        <a href="stats.php">Gesamtstatistik</a>
+        <a href="pixl_stats.php">Pixl Stats</a>
+        <a href="stat/dashboard.php">Dashboard</a>
+        <a href="stat/dashboardx2.html">DashboardX2</a>
+        <a href="stat/checkthis.php">Click Paths</a>
+        <a href="configurator.php">Configurator</a>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    <section class="toolbar" aria-label="File filters">
+      <label class="search" for="fileSearch">
+        Search files
+        <input id="fileSearch" type="search" placeholder="File name or role" autocomplete="off">
+      </label>
+      <div class="segments" role="group" aria-label="File category">
+        <button type="button" data-filter="all" aria-pressed="true">All</button>
+        <button type="button" data-filter="runtime" aria-pressed="false">Runtime</button>
+        <button type="button" data-filter="optional" aria-pressed="false">Optional</button>
+        <button type="button" data-filter="docs" aria-pressed="false">Docs</button>
+        <button type="button" data-filter="project" aria-pressed="false">Project</button>
+        <button type="button" data-filter="legacy" aria-pressed="false">Legacy</button>
+        <button type="button" data-filter="private" aria-pressed="false">Private</button>
+      </div>
+    </section>
+
+    <section class="file-table" aria-label="Stats3 files">
+      <div class="table-head" aria-hidden="true">
+        <span>File</span><span>Role</span><span>Status</span><span>CHMOD</span>
+      </div>
+
+      <section class="file-group" data-group="runtime">
+        <div class="group-title"><h2>Runtime</h2><span>12 files</span></div>
+        <div class="file-row" data-category="runtime"><div class="file-name"><a href="./">index.html</a></div><div class="role">Main server file overview</div><span class="status active">Active</span><span class="mode">644</span></div>
+        <div class="file-row" data-category="runtime"><div class="file-name"><a href="pixl77.js">pixl77.js</a></div><div class="role">Browser analytics tracker</div><span class="status active">Active</span><span class="mode">644</span></div>
+        <div class="file-row" data-category="runtime"><div class="file-name">pixl_collect.php</div><div class="role">MySQL collector endpoint</div><span class="status active">Endpoint</span><span class="mode">644</span></div>
+        <div class="file-row" data-category="runtime"><div class="file-name">pixl_server.php</div><div class="role">Shared MySQL, auth and schema library</div><span class="status active">Library</span><span class="mode">644</span></div>
+        <div class="file-row" data-category="runtime"><div class="file-name"><a href="pixl_stats.php">pixl_stats.php</a></div><div class="role">Primary statistics dashboard</div><span class="status active">Active</span><span class="mode">644</span></div>
+        <div class="file-row" data-category="runtime"><div class="file-name"><a href="stats.php">stats.php</a></div><div class="role">Combined MySQL statistics dashboard</div><span class="status active">Active</span><span class="mode">644</span></div>
+        <div class="file-row" data-category="runtime"><div class="file-name"><a href="stat/index.php">stat/index.php</a></div><div class="role">Statistics dashboard overview</div><span class="status active">Active</span><span class="mode">644</span></div>
+        <div class="file-row" data-category="runtime"><div class="file-name"><a href="stat/dashboard.php">stat/dashboard.php</a></div><div class="role">MySQL analytics dashboard</div><span class="status active">Active</span><span class="mode">644</span></div>
+        <div class="file-row" data-category="runtime"><div class="file-name"><a href="stat/dashboardx2.html">stat/dashboardx2.html</a></div><div class="role">Standalone DashboardX2 client</div><span class="status active">Active</span><span class="mode">644</span></div>
+        <div class="file-row" data-category="runtime"><div class="file-name"><a href="stat/checkthis.php">stat/checkthis.php</a></div><div class="role">Click paths, levels and campaigns</div><span class="status active">Active</span><span class="mode">644</span></div>
+        <div class="file-row" data-category="runtime"><div class="file-name"><a href="configurator.php">configurator.php</a></div><div class="role">Protected configuration administration</div><span class="status active">Admin</span><span class="mode">644</span></div>
+        <div class="file-row" data-category="runtime"><div class="file-name"><a href="reset_stats.php">reset_stats.php</a></div><div class="role">Protected MySQL statistics reset</div><span class="status active">Admin</span><span class="mode">644</span></div>
+      </section>
+
+      <section class="file-group" data-group="optional">
+        <div class="group-title"><h2>Optional Features</h2><span>5 files</span></div>
+        <div class="file-row" data-category="optional"><div class="file-name"><a href="pixel_stats2.php">pixel_stats2.php</a></div><div class="role">Web Push administration</div><span class="status active">Optional</span><span class="mode">644</span></div>
+        <div class="file-row" data-category="optional"><div class="file-name"><a href="pixel_webpush_sw.js">pixel_webpush_sw.js</a></div><div class="role">Web Push service worker</div><span class="status active">Optional</span><span class="mode">644</span></div>
+        <div class="file-row" data-category="optional"><div class="file-name"><a href="pixl_setup_check.php">pixl_setup_check.php</a></div><div class="role">MySQL and PHP setup diagnostics</div><span class="status active">Setup</span><span class="mode">644</span></div>
+        <div class="file-row" data-category="optional"><div class="file-name"><a href="stat/dashboardx2.php">stat/dashboardx2.php</a></div><div class="role">Compatibility redirect to DashboardX2 HTML</div><span class="status active">Redirect</span><span class="mode">644</span></div>
+        <div class="file-row" data-category="optional"><div class="file-name"><a href="demo.html">demo.html</a></div><div class="role">Local tracker integration demo</div><span class="status active">Development</span><span class="mode">644</span></div>
+      </section>
+
+      <section class="file-group" data-group="docs">
+        <div class="group-title"><h2>Documentation</h2><span>9 files</span></div>
+        <div class="file-row" data-category="docs"><div class="file-name"><a href="README.md">README.md</a></div><div class="role">Project overview</div><span class="status docs">Docs</span><span class="mode">644</span></div>
+        <div class="file-row" data-category="docs"><div class="file-name"><a href="SECURITY.md">SECURITY.md</a></div><div class="role">Security guidance</div><span class="status docs">Docs</span><span class="mode">644</span></div>
+        <div class="file-row" data-category="docs"><div class="file-name"><a href="CHANGELOG.md">CHANGELOG.md</a></div><div class="role">Version history</div><span class="status docs">Docs</span><span class="mode">644</span></div>
+        <div class="file-row" data-category="docs"><div class="file-name"><a href="LICENSE">LICENSE</a></div><div class="role">Project license</div><span class="status docs">Docs</span><span class="mode">644</span></div>
+        <div class="file-row" data-category="docs"><div class="file-name"><a href="readme%207.txt">readme 7.txt</a></div><div class="role">File and CHMOD reference</div><span class="status docs">Docs</span><span class="mode">644</span></div>
+        <div class="file-row" data-category="docs"><div class="file-name"><a href="docs/API.md">docs/API.md</a></div><div class="role">Endpoint reference</div><span class="status docs">Docs</span><span class="mode">644</span></div>
+        <div class="file-row" data-category="docs"><div class="file-name"><a href="docs/INSTALLATION.md">docs/INSTALLATION.md</a></div><div class="role">Installation guide</div><span class="status docs">Docs</span><span class="mode">644</span></div>
+        <div class="file-row" data-category="docs"><div class="file-name"><a href="docs/IONOS.md">docs/IONOS.md</a></div><div class="role">IONOS deployment guide</div><span class="status docs">Docs</span><span class="mode">644</span></div>
+        <div class="file-row" data-category="docs"><div class="file-name"><a href="examples/bayerchristian-embed.html">examples/bayerchristian-embed.html</a></div><div class="role">External tracker embed example</div><span class="status docs">Example</span><span class="mode">644</span></div>
+      </section>
+
+      <section class="file-group" data-group="project">
+        <div class="group-title"><h2>Project Files</h2><span>6 files</span></div>
+        <div class="file-row" data-category="project"><div class="file-name"><a href=".editorconfig">.editorconfig</a></div><div class="role">Editor formatting settings</div><span class="status project">Project</span><span class="mode">644</span></div>
+        <div class="file-row" data-category="project"><div class="file-name"><a href=".gitignore">.gitignore</a></div><div class="role">Git exclusions</div><span class="status project">Project</span><span class="mode">644</span></div>
+        <div class="file-row" data-category="project"><div class="file-name"><a href=".github/workflows/ci.yml">.github/workflows/ci.yml</a></div><div class="role">CI lint workflow</div><span class="status project">Project</span><span class="mode">644</span></div>
+        <div class="file-row" data-category="project"><div class="file-name"><a href="composer.json">composer.json</a></div><div class="role">PHP package and lint scripts</div><span class="status project">Project</span><span class="mode">644</span></div>
+        <div class="file-row" data-category="project"><div class="file-name"><a href="pixl_schema.sql">pixl_schema.sql</a></div><div class="role">Optional manual MySQL schema</div><span class="status project">Project</span><span class="mode">644</span></div>
+        <div class="file-row" data-category="project"><div class="file-name">pixl_config.example.php</div><div class="role">Safe PHP configuration template</div><span class="status project">Template</span><span class="mode">644</span></div>
+      </section>
+
+      <section class="file-group" data-group="private">
+        <div class="group-title"><h2>Private Configuration</h2><span>2 files</span></div>
+        <div class="file-row" data-category="private"><div class="file-name">pixl_config.php</div><div class="role">Active MySQL credentials and dashboard secrets</div><span class="status private">Private</span><span class="mode">600</span></div>
+        <div class="file-row" data-category="private"><div class="file-name">pixl_config.ionos.example.php</div><div class="role">Deployment-specific IONOS configuration</div><span class="status private">Remove</span><span class="mode">600</span></div>
+      </section>
+
+      <section class="file-group" data-group="legacy">
+        <div class="group-title"><h2>Legacy and Backups</h2><span>5 files</span></div>
+        <div class="file-row" data-category="legacy"><div class="file-name"><a href="pixl6.js">pixl6.js</a></div><div class="role">Previous tracker generation</div><span class="status legacy">Legacy</span><span class="mode">644</span></div>
+        <div class="file-row" data-category="legacy"><div class="file-name"><a href="pixl_stats%20Kopie.php">pixl_stats Kopie.php</a></div><div class="role">Old dashboard backup</div><span class="status legacy">Backup</span><span class="mode">644</span></div>
+        <div class="file-row" data-category="legacy"><div class="file-name"><a href="pixl_stats%20Kopie%202.php">pixl_stats Kopie 2.php</a></div><div class="role">Old dashboard backup</div><span class="status legacy">Backup</span><span class="mode">644</span></div>
+        <div class="file-row" data-category="legacy"><div class="file-name"><a href="pixl_stats33.php">pixl_stats33.php</a></div><div class="role">Alternate statistics dashboard</div><span class="status legacy">Archive</span><span class="mode">644</span></div>
+        <div class="file-row" data-category="legacy"><div class="file-name"><a href="stat/dashboardx.php">stat/dashboardx.php</a></div><div class="role">Legacy SQLite dashboard</div><span class="status legacy">Legacy</span><span class="mode">644</span></div>
+      </section>
+
+      <section class="file-group" data-group="project">
+        <div class="group-title"><h2>System Files</h2><span>3 files</span></div>
+        <div class="file-row" data-category="project"><div class="file-name">.DS_Store</div><div class="role">macOS metadata</div><span class="status private">Remove</span><span class="mode">644</span></div>
+        <div class="file-row" data-category="project"><div class="file-name">stat/.DS_Store</div><div class="role">macOS metadata</div><span class="status private">Remove</span><span class="mode">644</span></div>
+        <div class="file-row" data-category="project"><div class="file-name">stat/data/.DS_Store</div><div class="role">macOS metadata</div><span class="status private">Remove</span><span class="mode">644</span></div>
+      </section>
+    </section>
+
+    <p id="emptyState" class="empty" hidden>No matching files.</p>
+  </main>
+
+  <footer>
+    Main folder: /stats3 · <a href="readme%207.txt">CHMOD reference</a>
+  </footer>
+
+  <script>
+    (() => {
+      "use strict";
+
+      const search = document.getElementById("fileSearch");
+      const rows = Array.from(document.querySelectorAll(".file-row"));
+      const groups = Array.from(document.querySelectorAll(".file-group"));
+      const buttons = Array.from(document.querySelectorAll("[data-filter]"));
+      const visibleCount = document.getElementById("visibleCount");
+      const totalCount = document.getElementById("totalCount");
+      const emptyState = document.getElementById("emptyState");
+      let activeFilter = "all";
+
+      totalCount.textContent = String(rows.length);
+
+      function applyFilters() {
+        const query = search.value.trim().toLowerCase();
+        let visible = 0;
+
+        rows.forEach((row) => {
+          const categories = (row.dataset.category || "").split(/\s+/);
+          const categoryMatch = activeFilter === "all" || categories.includes(activeFilter);
+          const textMatch = query === "" || row.textContent.toLowerCase().includes(query);
+          const show = categoryMatch && textMatch;
+          row.hidden = !show;
+          if (show) visible += 1;
+        });
+
+        groups.forEach((group) => {
+          group.hidden = !Array.from(group.querySelectorAll(".file-row")).some((row) => !row.hidden);
+        });
+
+        visibleCount.textContent = String(visible);
+        emptyState.hidden = visible !== 0;
+      }
+
+      buttons.forEach((button) => {
+        button.addEventListener("click", () => {
+          activeFilter = button.dataset.filter || "all";
+          buttons.forEach((item) => item.setAttribute("aria-pressed", item === button ? "true" : "false"));
+          applyFilters();
+        });
+      });
+
+      search.addEventListener("input", applyFilters);
+      applyFilters();
+    })();
+  </script>
+</body>
+</html>

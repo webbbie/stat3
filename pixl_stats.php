@@ -229,6 +229,285 @@ function pixl_fetch_rows(PDO $pdo, string $sql, array $params = []): array
     return $stmt->fetchAll();
 }
 
+function pixl_dashboardx2_scalar(PDO $pdo, string $sql, array $params = [])
+{
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute($params);
+    return $stmt->fetchColumn();
+}
+
+function pixl_dashboardx2_chart(array $rows): array
+{
+    $labels = [];
+    $values = [];
+    foreach ($rows as $row) {
+        $labels[] = (string)($row['label'] ?? '');
+        $values[] = (int)($row['count'] ?? 0);
+    }
+    return ['labels' => $labels, 'values' => $values];
+}
+
+function pixl_dashboardx2_referrer_chart(array $rows): array
+{
+    $siteHost = strtolower(trim((string)(pixl_config()['site_id'] ?? '')));
+    $siteHost = preg_replace('/^www\./', '', $siteHost) ?: $siteHost;
+    $totals = [];
+
+    foreach ($rows as $row) {
+        $value = trim((string)($row['label'] ?? ''));
+        if ($value === '') {
+            continue;
+        }
+
+        $host = parse_url($value, PHP_URL_HOST);
+        $label = is_string($host) && $host !== '' ? strtolower($host) : $value;
+        $normalized = preg_replace('/^www\./', '', strtolower($label)) ?: strtolower($label);
+        if ($siteHost !== '' && $normalized === $siteHost) {
+            continue;
+        }
+        $totals[$label] = ($totals[$label] ?? 0) + (int)($row['count'] ?? 0);
+    }
+
+    arsort($totals);
+    $totals = array_slice($totals, 0, 10, true);
+    return [
+        'labels' => array_keys($totals),
+        'values' => array_values($totals),
+    ];
+}
+
+function pixl_dashboardx2_feed(PDO $pdo, string $table, int $days, int $limit): array
+{
+    $berlin = new DateTimeZone('Europe/Berlin');
+    $nowBerlin = new DateTimeImmutable('now', $berlin);
+    $todayStart = $nowBerlin->setTime(0, 0);
+    $todayEnd = $todayStart->modify('+1 day');
+    $todayStartUtc = $todayStart->setTimezone(new DateTimeZone('UTC'))->format('Y-m-d H:i:s');
+    $todayEndUtc = $todayEnd->setTimezone(new DateTimeZone('UTC'))->format('Y-m-d H:i:s');
+    $sinceUtc = $nowBerlin->modify('-' . $days . ' days')->setTimezone(new DateTimeZone('UTC'))->format('Y-m-d H:i:s');
+    $last24Utc = $nowBerlin->modify('-24 hours')->setTimezone(new DateTimeZone('UTC'))->format('Y-m-d H:i:s');
+    $last60Utc = $nowBerlin->modify('-60 minutes')->setTimezone(new DateTimeZone('UTC'))->format('Y-m-d H:i:s');
+    $pageExpr = pixl_sql_page_expression();
+    $scope = pixl_sql_configured_stats_url_condition($pdo);
+    $scopeAnd = $scope !== '' ? " AND $scope" : '';
+    $scopeWhere = $scope !== '' ? " WHERE $scope" : '';
+
+    $todayParams = [':today_start' => $todayStartUtc, ':today_end' => $todayEndUtc];
+    $kpi = [
+        'real_visitors_today' => (int)pixl_dashboardx2_scalar(
+            $pdo,
+            "SELECT COUNT(DISTINCT `visitor_hash`) FROM `$table`
+             WHERE `created_at` >= :today_start AND `created_at` < :today_end
+               AND `is_bot` = 0 AND `visitor_hash` <> ''$scopeAnd",
+            $todayParams
+        ),
+        'impressions_today' => (int)pixl_dashboardx2_scalar(
+            $pdo,
+            "SELECT COUNT(*) FROM `$table` WHERE `created_at` >= :today_start AND `created_at` < :today_end$scopeAnd",
+            $todayParams
+        ),
+        'unique_ips_today' => (int)pixl_dashboardx2_scalar(
+            $pdo,
+            "SELECT COUNT(DISTINCT `visitor_hash`) FROM `$table`
+             WHERE `created_at` >= :today_start AND `created_at` < :today_end AND `visitor_hash` <> ''$scopeAnd",
+            $todayParams
+        ),
+        'bot_visits_today' => (int)pixl_dashboardx2_scalar(
+            $pdo,
+            "SELECT COUNT(*) FROM `$table`
+             WHERE `created_at` >= :today_start AND `created_at` < :today_end AND `is_bot` = 1$scopeAnd",
+            $todayParams
+        ),
+        'unique_pages_today' => (int)pixl_dashboardx2_scalar(
+            $pdo,
+            "SELECT COUNT(DISTINCT $pageExpr) FROM `$table`
+             WHERE `created_at` >= :today_start AND `created_at` < :today_end$scopeAnd",
+            $todayParams
+        ),
+        'avg_visitors_per_min' => round((float)pixl_dashboardx2_scalar(
+            $pdo,
+            "SELECT COUNT(DISTINCT `visitor_hash`) / 60 FROM `$table`
+             WHERE `created_at` >= :last_60 AND `is_bot` = 0 AND `visitor_hash` <> ''$scopeAnd",
+            [':last_60' => $last60Utc]
+        ), 4),
+        'real_visitors_total' => (int)pixl_dashboardx2_scalar(
+            $pdo,
+            "SELECT COUNT(DISTINCT `visitor_hash`) FROM `$table` WHERE `is_bot` = 0 AND `visitor_hash` <> ''$scopeAnd"
+        ),
+        'impressions_total' => (int)pixl_dashboardx2_scalar($pdo, "SELECT COUNT(*) FROM `$table`$scopeWhere"),
+        'unique_ips_total' => (int)pixl_dashboardx2_scalar(
+            $pdo,
+            "SELECT COUNT(DISTINCT `visitor_hash`) FROM `$table` WHERE `visitor_hash` <> ''$scopeAnd"
+        ),
+        'bot_visits_total' => (int)pixl_dashboardx2_scalar($pdo, "SELECT COUNT(*) FROM `$table` WHERE `is_bot` = 1$scopeAnd"),
+        'unique_pages_total' => (int)pixl_dashboardx2_scalar($pdo, "SELECT COUNT(DISTINCT $pageExpr) FROM `$table`$scopeWhere"),
+        'avg_score_total' => round((float)pixl_dashboardx2_scalar(
+            $pdo,
+            "SELECT COALESCE(AVG(CASE
+                WHEN `v3_user_score` IS NOT NULL THEN LEAST(1, GREATEST(0, `v3_user_score`))
+                WHEN `reading_score` IS NOT NULL THEN LEAST(1, GREATEST(0, `reading_score` / 100))
+                ELSE NULL END), 0) FROM `$table`$scopeWhere"
+        ), 4),
+    ];
+
+    $visRows = pixl_fetch_rows(
+        $pdo,
+        "SELECT DATE(`created_at`) AS label,
+                COUNT(DISTINCT CASE WHEN `is_bot` = 0 AND `visitor_hash` <> '' THEN `visitor_hash` END) AS count
+         FROM `$table`
+         WHERE `created_at` >= :chart_since$scopeAnd
+         GROUP BY DATE(`created_at`)
+         ORDER BY label ASC",
+        [':chart_since' => $sinceUtc]
+    );
+
+    $referrerExpr = pixl_sql_referrer_expression();
+    $referrerRows = pixl_fetch_rows(
+        $pdo,
+        "SELECT $referrerExpr AS label, COUNT(*) AS count
+         FROM `$table`
+         WHERE `created_at` >= :referrer_since AND `referrer` IS NOT NULL AND `referrer` <> ''$scopeAnd
+         GROUP BY label
+         ORDER BY count DESC
+         LIMIT 30",
+        [':referrer_since' => $last24Utc]
+    );
+
+    $charts = [
+        'vis' => pixl_dashboardx2_chart($visRows),
+        'ref' => pixl_dashboardx2_referrer_chart($referrerRows),
+    ];
+
+    foreach (['browser' => 'browser', 'os' => 'os', 'lang' => 'language'] as $key => $column) {
+        $rows = pixl_fetch_rows(
+            $pdo,
+            "SELECT `$column` AS label, COUNT(*) AS count
+             FROM `$table`
+             WHERE `created_at` >= :breakdown_since AND `$column` <> ''$scopeAnd
+             GROUP BY `$column`
+             ORDER BY count DESC
+             LIMIT 10",
+            [':breakdown_since' => $last24Utc]
+        );
+        $charts[$key] = pixl_dashboardx2_chart($rows);
+    }
+
+    $resolutionRows = pixl_fetch_rows(
+        $pdo,
+        "SELECT COALESCE(NULLIF(`screen`, ''), NULLIF(`viewport`, ''), 'Unbekannt') AS label, COUNT(*) AS count
+         FROM `$table`
+         WHERE `created_at` >= :resolution_since$scopeAnd
+         GROUP BY label
+         ORDER BY count DESC
+         LIMIT 10",
+        [':resolution_since' => $last24Utc]
+    );
+    $charts['res'] = pixl_dashboardx2_chart($resolutionRows);
+
+    $topPagesToday = pixl_fetch_rows(
+        $pdo,
+        "SELECT $pageExpr AS url, COUNT(*) AS count
+         FROM `$table`
+         WHERE `created_at` >= :top_today_start AND `created_at` < :top_today_end$scopeAnd
+         GROUP BY url
+         ORDER BY count DESC
+         LIMIT 10",
+        [':top_today_start' => $todayStartUtc, ':top_today_end' => $todayEndUtc]
+    );
+
+    $topPagesTotal = pixl_fetch_rows(
+        $pdo,
+         "SELECT $pageExpr AS url, COUNT(*) AS count
+         FROM `$table`$scopeWhere
+         GROUP BY url
+         ORDER BY count DESC
+         LIMIT 10"
+    );
+
+    $scoreExpr = "CASE
+        WHEN e.`v3_user_score` IS NOT NULL THEN LEAST(1, GREATEST(0, e.`v3_user_score`))
+        WHEN e.`reading_score` IS NOT NULL THEN LEAST(1, GREATEST(0, e.`reading_score` / 100))
+        ELSE NULL END";
+    $mlExpr = "CASE WHEN ($scoreExpr) >= 0.7 THEN 1 ELSE 0 END";
+    $gExpr = "CASE WHEN ($scoreExpr) IS NULL THEN NULL
+        ELSE LEAST(1, GREATEST(0, (0.75 * ($scoreExpr)) + (0.25 * ($mlExpr)))) END";
+    $recentPageExpr = pixl_sql_page_expression('e');
+    $uniquePageExpr = pixl_sql_page_expression('u');
+    $recentReferrerExpr = pixl_sql_referrer_expression('e');
+    $recentScope = pixl_sql_configured_stats_url_condition($pdo, 'e');
+    $recentScopeAnd = $recentScope !== '' ? " AND $recentScope" : '';
+    $visitsTotalScope = pixl_sql_configured_stats_url_condition($pdo, 'vt');
+    $visitsTotalScopeAnd = $visitsTotalScope !== '' ? " AND $visitsTotalScope" : '';
+    $uniqueScope = pixl_sql_configured_stats_url_condition($pdo, 'u');
+    $uniqueScopeAnd = $uniqueScope !== '' ? " AND $uniqueScope" : '';
+    $visits24Scope = pixl_sql_configured_stats_url_condition($pdo, 'v24');
+    $visits24ScopeAnd = $visits24Scope !== '' ? " AND $visits24Scope" : '';
+
+    $recent = pixl_fetch_rows(
+        $pdo,
+        "SELECT e.`created_at`, e.`visitor_hash`, e.`ip_hash`, e.`language` AS lang,
+                $recentPageExpr AS url, $recentReferrerExpr AS referrer,
+                CASE WHEN e.`is_bot` = 1 THEN 0 ELSE 1 END AS human,
+                e.`is_bot` AS bot, $scoreExpr AS score,
+                CASE WHEN e.`session_duration` IS NULL THEN NULL ELSE e.`session_duration` * 1000 END AS dwell_ms,
+                0 AS dc,
+                CASE WHEN e.`visitor_hash` = '' THEN 1 ELSE
+                  (SELECT COUNT(*) FROM `$table` vt WHERE vt.`visitor_hash` = e.`visitor_hash`$visitsTotalScopeAnd) END AS visits_total,
+                CASE WHEN e.`visitor_hash` = '' THEN 0 ELSE
+                  (SELECT COUNT(DISTINCT $uniquePageExpr) FROM `$table` u
+                   WHERE u.`visitor_hash` = e.`visitor_hash` AND u.`created_at` >= :unique_24_since$uniqueScopeAnd) END AS unique24h,
+                CASE WHEN e.`visitor_hash` = '' THEN 0 ELSE
+                  (SELECT COUNT(*) FROM `$table` v24
+                   WHERE v24.`visitor_hash` = e.`visitor_hash` AND v24.`created_at` >= :visits_24_since$visits24ScopeAnd) END AS visits_24h,
+                '' AS reg, $mlExpr AS ml_score, $gExpr AS g_score,
+                CASE WHEN e.`is_bot` = 0 AND COALESCE(($scoreExpr), 0) >= 0.5 THEN 1 ELSE 0 END AS gate_ok,
+                1 AS tracked, e.`user_agent` AS ua
+         FROM `$table` e
+         WHERE e.`created_at` >= :recent_since$recentScopeAnd
+         ORDER BY e.`created_at` DESC
+         LIMIT $limit",
+        [
+            ':unique_24_since' => $last24Utc,
+            ':visits_24_since' => $last24Utc,
+            ':recent_since' => $sinceUtc,
+        ]
+    );
+
+    return [
+        'ok' => true,
+        'error' => '',
+        'kpi' => $kpi,
+        'charts' => $charts,
+        'topPagesToday' => $topPagesToday,
+        'topPagesTotal' => $topPagesTotal,
+        'recent' => $recent,
+    ];
+}
+
+if (isset($_GET['dashboardx2_json'])) {
+    $dashboardDays = max(1, min(365, (int)($_GET['days'] ?? 30)));
+    $dashboardLimit = max(1, min(500, (int)($_GET['limit'] ?? 25)));
+    try {
+        $dashboard = pixl_dashboardx2_feed($pdo, $table, $dashboardDays, $dashboardLimit);
+        pixl_json_response([
+            'ok' => true,
+            'table' => $table,
+            'days' => $dashboardDays,
+            'limit' => $dashboardLimit,
+            'generatedAt' => gmdate('c'),
+            'dashboardx2' => $dashboard,
+        ]);
+    } catch (Throwable $error) {
+        pixl_json_response([
+            'ok' => false,
+            'dashboardx2' => [
+                'ok' => false,
+                'error' => $error->getMessage(),
+            ],
+        ], 500);
+    }
+}
+
 function pixl_stats_notify_event(array $row): array
 {
     return [
@@ -256,8 +535,10 @@ function pixl_stats_notify_event(array $row): array
 
 if (isset($_GET['notify_feed'])) {
     $after = max(0, (int)($_GET['after'] ?? 0));
-    $latestId = pixl_fetch_value($pdo, "SELECT COALESCE(MAX(id), 0) FROM `$table`");
-    $latestEventTs = pixl_fetch_value($pdo, "SELECT COALESCE(UNIX_TIMESTAMP(MAX(created_at)), 0) FROM `$table`");
+    $notifyScope = pixl_sql_configured_stats_url_condition($pdo);
+    $notifyWhere = $notifyScope !== '' ? " WHERE $notifyScope" : '';
+    $latestId = pixl_fetch_value($pdo, "SELECT COALESCE(MAX(id), 0) FROM `$table`$notifyWhere");
+    $latestEventTs = pixl_fetch_value($pdo, "SELECT COALESCE(UNIX_TIMESTAMP(MAX(created_at)), 0) FROM `$table`$notifyWhere");
     $events = pixl_fetch_rows(
         $pdo,
         "SELECT id, created_at, UNIX_TIMESTAMP(created_at) AS created_ts,
@@ -266,7 +547,7 @@ if (isset($_GET['notify_feed'])) {
                 session_duration, user_agent,
                 CASE WHEN LOWER(user_agent) LIKE '%bot%' THEN 1 ELSE 0 END AS ua_contains_bot
          FROM `$table`
-         WHERE id > :after
+         WHERE id > :after" . ($notifyScope !== '' ? " AND $notifyScope" : '') . "
          ORDER BY id ASC
          LIMIT 25",
         [':after' => $after]
@@ -282,6 +563,7 @@ if (isset($_GET['notify_feed'])) {
 
 $days = max(1, min(365, (int)($_GET['days'] ?? 30)));
 $botFilter = (string)($_GET['bot'] ?? 'all');
+$hideActivity = isset($_GET['hide_activity']) && $_GET['hide_activity'] === '1';
 if (!in_array($botFilter, ['all', 'bots', 'humans'], true)) {
     $botFilter = 'all';
 }
@@ -290,7 +572,11 @@ $since = (new DateTimeImmutable('now', new DateTimeZone('UTC')))
     ->modify('-' . $days . ' days')
     ->format('Y-m-d H:i:s');
 
+$statsScope = pixl_sql_configured_stats_url_condition($pdo);
 $where = 'created_at >= :since';
+if ($statsScope !== '') {
+    $where .= " AND $statsScope";
+}
 $params = [':since' => $since];
 if ($botFilter === 'bots') {
     $where .= ' AND is_bot = 1';
@@ -298,10 +584,12 @@ if ($botFilter === 'bots') {
     $where .= ' AND is_bot = 0';
 }
 
-$totalAll = pixl_fetch_value($pdo, "SELECT COUNT(*) FROM `$table` WHERE created_at >= :since", [':since' => $since]);
-$latestEventId = pixl_fetch_value($pdo, "SELECT COALESCE(MAX(id), 0) FROM `$table`");
-$latestEventTs = pixl_fetch_value($pdo, "SELECT COALESCE(UNIX_TIMESTAMP(MAX(created_at)), 0) FROM `$table`");
-$botAll = pixl_fetch_value($pdo, "SELECT COUNT(*) FROM `$table` WHERE created_at >= :since AND is_bot = 1", [':since' => $since]);
+$allWhere = 'created_at >= :since' . ($statsScope !== '' ? " AND $statsScope" : '');
+$latestWhere = $statsScope !== '' ? " WHERE $statsScope" : '';
+$totalAll = pixl_fetch_value($pdo, "SELECT COUNT(*) FROM `$table` WHERE $allWhere", [':since' => $since]);
+$latestEventId = pixl_fetch_value($pdo, "SELECT COALESCE(MAX(id), 0) FROM `$table`$latestWhere");
+$latestEventTs = pixl_fetch_value($pdo, "SELECT COALESCE(UNIX_TIMESTAMP(MAX(created_at)), 0) FROM `$table`$latestWhere");
+$botAll = pixl_fetch_value($pdo, "SELECT COUNT(*) FROM `$table` WHERE $allWhere AND is_bot = 1", [':since' => $since]);
 $humanAll = max(0, $totalAll - $botAll);
 $botPercent = $totalAll > 0 ? round(($botAll / $totalAll) * 100) : 0;
 
@@ -337,12 +625,13 @@ foreach ($byDay as $row) {
     $dayMax = max($dayMax, (int)$row['count']);
 }
 
+$normalizedPathExpr = pixl_sql_path_expression();
 $topPaths = pixl_fetch_rows(
     $pdo,
-    "SELECT path AS label, COUNT(*) AS count, SUM(is_bot) AS bots, ROUND(AVG(reading_score)) AS avg_score
+    "SELECT $normalizedPathExpr AS label, COUNT(*) AS count, SUM(is_bot) AS bots, ROUND(AVG(reading_score)) AS avg_score
      FROM `$table`
      WHERE $where
-     GROUP BY path
+     GROUP BY label
      ORDER BY count DESC
      LIMIT 20",
     $params
@@ -390,11 +679,11 @@ $topUserAgents = pixl_fetch_rows(
 
 $recentBots = pixl_fetch_rows(
     $pdo,
-    "SELECT created_at, source, reason, hostname, path, bot_score, bot_category,
+    "SELECT created_at, source, reason, hostname, $normalizedPathExpr AS path, bot_score, bot_category,
             bot_name, bot_reasons, user_agent, request_method, request_uri,
             CASE WHEN LOWER(user_agent) LIKE '%bot%' THEN 1 ELSE 0 END AS ua_contains_bot
      FROM `$table`
-     WHERE created_at >= :since AND is_bot = 1
+     WHERE $allWhere AND is_bot = 1
      ORDER BY created_at DESC
      LIMIT 40",
     [':since' => $since]
@@ -402,7 +691,7 @@ $recentBots = pixl_fetch_rows(
 
 $recent = pixl_fetch_rows(
     $pdo,
-    "SELECT created_at, source, reason, title, hostname, path, browser, os, device, country,
+    "SELECT created_at, source, reason, title, hostname, $normalizedPathExpr AS path, browser, os, device, country,
             session_duration, reading_label, reading_seconds, reading_score,
             render_status, console_error_count, dialog_error_count,
             is_bot, bot_score, bot_category, bot_name, bot_reasons,
@@ -864,6 +1153,8 @@ $recent = pixl_fetch_rows(
           Ton aus
         </label>
         <form method="get">
+          <?php if (isset($_GET['embed']) && $_GET['embed'] === '1'): ?><input type="hidden" name="embed" value="1"><?php endif; ?>
+          <?php if ($hideActivity): ?><input type="hidden" name="hide_activity" value="1"><?php endif; ?>
           <label for="days">Tage</label>
           <input id="days" name="days" type="number" min="1" max="365" value="<?= pixl_h($days) ?>">
           <label for="bot">Filter</label>
@@ -968,6 +1259,7 @@ $recent = pixl_fetch_rows(
       </table>
     </section>
 
+    <?php if (!$hideActivity): ?>
     <section class="wide scroll">
       <h2>Letzte Bot-Aufrufe</h2>
       <table>
@@ -1036,6 +1328,7 @@ $recent = pixl_fetch_rows(
         </tbody>
       </table>
     </section>
+    <?php endif; ?>
   </main>
   <div id="uaOverlay" class="ua-overlay" hidden>
     <div class="ua-panel" role="dialog" aria-label="UserAgent">

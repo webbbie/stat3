@@ -16,7 +16,8 @@
       "php -l pixl_setup_check.php",
       "php -l pixl_config.example.php",
       "php -l pixl_config.ionos.example.php",
-      "node --check pixel_webpush_sw.js"
+      "node --check pixel_webpush_sw.js",
+      "node --check pixl77.js"
     ]
   }
 }

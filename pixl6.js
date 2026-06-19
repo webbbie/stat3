@@ -55,7 +55,7 @@
 
     // SQL/PHP Collector auf dem eigenen Webspace.
     // pixl_collect.php speichert die Events in MySQL; pixl_stats.php zeigt sie an.
-    SQL_ENDPOINT: "https://www.bayerchristian.de/pixl_collect.php",
+    SQL_ENDPOINT: "https://www.bayerchristian.de/stats3/pixl_collect.php",
     SQL_SITE_ID: "www.bayerchristian.de",
     SQL_PUBLIC_KEY: "",
 

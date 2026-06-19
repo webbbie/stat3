@@ -34,7 +34,14 @@ return [
         '127.0.0.1',
     ],
 
-    // Optional: set the same value in pixl6.js CONFIG.SQL_PUBLIC_KEY.
+    // Only these query-free URLs trigger push messages and appear in pixl_stats.php.
+    // Leave empty to include every URL.
+    'stats_urls' => [
+        'https://www.example.com/',
+        '/landing-page/',
+    ],
+
+    // Optional: set the same value in pixl77.js CONFIG.SQL_PUBLIC_KEY.
     'public_key' => '',
 
     // Change this to a long random string before production use.

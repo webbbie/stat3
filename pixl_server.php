@@ -83,6 +83,181 @@ function pixl_mysql_dsn(array $db, string $charset): string
     return $dsn;
 }
 
+function pixl_sql_page_expression(string $alias = ''): string
+{
+    if ($alias !== '' && !preg_match('/^[A-Za-z0-9_]+$/', $alias)) {
+        throw new RuntimeException('Ungueltiger SQL-Alias.');
+    }
+
+    $prefix = $alias !== '' ? '`' . $alias . '`.' : '';
+    $raw = "COALESCE(NULLIF({$prefix}`page_url`, ''), NULLIF({$prefix}`path`, ''), '/')";
+    return "COALESCE(NULLIF(SUBSTRING_INDEX(SUBSTRING_INDEX($raw, '?', 1), '#', 1), ''), '/')";
+}
+
+function pixl_sql_path_expression(string $alias = ''): string
+{
+    if ($alias !== '' && !preg_match('/^[A-Za-z0-9_]+$/', $alias)) {
+        throw new RuntimeException('Ungueltiger SQL-Alias.');
+    }
+
+    $prefix = $alias !== '' ? '`' . $alias . '`.' : '';
+    return "COALESCE(NULLIF(SUBSTRING_INDEX(SUBSTRING_INDEX({$prefix}`path`, '?', 1), '#', 1), ''), '/')";
+}
+
+function pixl_sql_referrer_expression(string $alias = ''): string
+{
+    if ($alias !== '' && !preg_match('/^[A-Za-z0-9_]+$/', $alias)) {
+        throw new RuntimeException('Ungueltiger SQL-Alias.');
+    }
+
+    $prefix = $alias !== '' ? '`' . $alias . '`.' : '';
+    return "COALESCE(NULLIF(SUBSTRING_INDEX(SUBSTRING_INDEX({$prefix}`referrer`, '?', 1), '#', 1), ''), 'direct')";
+}
+
+function pixl_url_without_parameters($value): string
+{
+    $value = trim((string)$value);
+    if ($value === '') {
+        return '';
+    }
+
+    $value = explode('?', $value, 2)[0];
+    return explode('#', $value, 2)[0];
+}
+
+function pixl_normalize_configured_url($value): string
+{
+    $value = trim((string)$value);
+    if ($value === '') {
+        return '';
+    }
+
+    if ($value[0] === '/') {
+        $path = parse_url($value, PHP_URL_PATH);
+        return is_string($path) && $path !== '' ? $path : '/';
+    }
+
+    $parts = parse_url($value);
+    if (!is_array($parts) || !isset($parts['scheme'], $parts['host'])) {
+        return '';
+    }
+
+    $scheme = strtolower((string)$parts['scheme']);
+    if (!in_array($scheme, ['http', 'https'], true)) {
+        return '';
+    }
+
+    $host = strtolower(rtrim((string)$parts['host'], '.'));
+    if ($host === '') {
+        return '';
+    }
+
+    $port = isset($parts['port']) ? ':' . (int)$parts['port'] : '';
+    $path = isset($parts['path']) && (string)$parts['path'] !== '' ? (string)$parts['path'] : '/';
+    return $scheme . '://' . $host . $port . $path;
+}
+
+function pixl_configured_stats_urls(): array
+{
+    $configured = pixl_config()['stats_urls'] ?? [];
+    if (!is_array($configured)) {
+        return [];
+    }
+
+    $urls = [];
+    foreach ($configured as $value) {
+        $normalized = pixl_normalize_configured_url($value);
+        if ($normalized !== '') {
+            $urls[$normalized] = true;
+        }
+    }
+    return array_keys($urls);
+}
+
+function pixl_configured_stats_url_rules(): array
+{
+    $rules = [];
+    foreach (pixl_configured_stats_urls() as $url) {
+        if ($url[0] === '/') {
+            $rules[] = ['host' => '', 'path' => $url];
+            continue;
+        }
+
+        $host = parse_url($url, PHP_URL_HOST);
+        $path = parse_url($url, PHP_URL_PATH);
+        if (!is_string($host) || $host === '') {
+            continue;
+        }
+        $rules[] = [
+            'host' => strtolower(rtrim($host, '.')),
+            'path' => is_string($path) && $path !== '' ? $path : '/',
+        ];
+    }
+    return $rules;
+}
+
+function pixl_event_matches_configured_stats_url(array $row): bool
+{
+    $rules = pixl_configured_stats_url_rules();
+    if (!$rules) {
+        return true;
+    }
+
+    $pageUrl = trim((string)($row['page_url'] ?? ''));
+    $host = strtolower(rtrim(trim((string)($row['hostname'] ?? '')), '.'));
+    if ($host === '' && $pageUrl !== '') {
+        $parsedHost = parse_url($pageUrl, PHP_URL_HOST);
+        if (is_string($parsedHost)) {
+            $host = strtolower(rtrim($parsedHost, '.'));
+        }
+    }
+
+    $path = trim((string)($row['path'] ?? ''));
+    if ($path === '' && $pageUrl !== '') {
+        $parsedPath = parse_url($pageUrl, PHP_URL_PATH);
+        $path = is_string($parsedPath) ? $parsedPath : '';
+    }
+    $parsedPath = parse_url($path, PHP_URL_PATH);
+    if (is_string($parsedPath) && $parsedPath !== '') {
+        $path = $parsedPath;
+    }
+    $path = pixl_normalize_configured_url($path !== '' ? $path : '/');
+
+    foreach ($rules as $rule) {
+        if ($path === $rule['path'] && ($rule['host'] === '' || $host === $rule['host'])) {
+            return true;
+        }
+    }
+    return false;
+}
+
+function pixl_sql_configured_stats_url_condition(PDO $pdo, string $alias = ''): string
+{
+    if ($alias !== '' && !preg_match('/^[A-Za-z0-9_]+$/', $alias)) {
+        throw new RuntimeException('Ungueltiger SQL-Alias.');
+    }
+
+    $rules = pixl_configured_stats_url_rules();
+    if (!$rules) {
+        return '';
+    }
+
+    $prefix = $alias !== '' ? '`' . $alias . '`.' : '';
+    $pathExpression = pixl_sql_path_expression($alias);
+    $conditions = [];
+    foreach ($rules as $rule) {
+        $path = $pdo->quote((string)$rule['path']);
+        if ($rule['host'] === '') {
+            $conditions[] = "$pathExpression = $path";
+            continue;
+        }
+        $host = $pdo->quote((string)$rule['host']);
+        $conditions[] = "(LOWER({$prefix}`hostname`) = $host AND $pathExpression = $path)";
+    }
+
+    return '(' . implode(' OR ', $conditions) . ')';
+}
+
 function pixl_ensure_schema(PDO $pdo): void
 {
     $table = pixl_table_name();
@@ -488,8 +663,53 @@ function pixl_clear_stats_auth_cookie(): void
     ]);
 }
 
+function pixl_stats_safe_return_url($value): string
+{
+    $value = trim((string)$value);
+    if ($value === '' || preg_match('/[\r\n]/', $value)) {
+        return '';
+    }
+
+    $parts = parse_url($value);
+    if (!is_array($parts) || isset($parts['scheme']) || isset($parts['host'])) {
+        return '';
+    }
+
+    $path = (string)($parts['path'] ?? '');
+    $allowedPaths = [
+        'pixl_stats.php',
+        'configurator.php',
+        'reset_stats.php',
+        'pixl_setup_check.php',
+        'stat/index.php',
+        'stat/dashboard.php',
+        'stat/dashboardx2.html',
+        'stat/checkthis.php',
+    ];
+    if (!in_array($path, $allowedPaths, true)) {
+        return '';
+    }
+
+    $queryValues = [];
+    parse_str((string)($parts['query'] ?? ''), $queryValues);
+    $query = [];
+    foreach (['days', 'limit', 'ar', 'bot'] as $key) {
+        if (isset($queryValues[$key]) && is_scalar($queryValues[$key])) {
+            $query[$key] = substr((string)$queryValues[$key], 0, 40);
+        }
+    }
+
+    return $path . ($query ? '?' . http_build_query($query) : '');
+}
+
 function pixl_redirect_without_password(): void
 {
+    $returnUrl = pixl_stats_safe_return_url($_GET['return'] ?? '');
+    if ($returnUrl !== '') {
+        header('Location: ' . $returnUrl);
+        exit;
+    }
+
     $params = $_GET;
     unset($params['key'], $params['logout']);
     $query = $params ? '?' . http_build_query($params) : '';
@@ -542,6 +762,11 @@ function pixl_require_stats_auth(): void
     $config = pixl_config();
     $password = (string)($config['stats_password'] ?? '');
     if ($password === '') {
+        $returnUrl = pixl_stats_safe_return_url($_GET['return'] ?? '');
+        if ($returnUrl !== '') {
+            header('Location: ' . $returnUrl);
+            exit;
+        }
         return;
     }
 
@@ -552,6 +777,11 @@ function pixl_require_stats_auth(): void
 
     $cookie = (string)($_COOKIE[pixl_stats_cookie_name()] ?? '');
     if ($cookie !== '' && hash_equals(pixl_stats_auth_token(), $cookie)) {
+        $returnUrl = pixl_stats_safe_return_url($_GET['return'] ?? '');
+        if ($returnUrl !== '') {
+            header('Location: ' . $returnUrl);
+            exit;
+        }
         return;
     }
 
@@ -564,6 +794,11 @@ function pixl_require_stats_auth(): void
         $given = (string)($_POST['stats_password'] ?? '');
         if (pixl_stats_password_ok($given)) {
             pixl_set_stats_auth_cookie();
+            $returnUrl = pixl_stats_safe_return_url($_GET['return'] ?? '');
+            if ($returnUrl !== '') {
+                header('Location: ' . $returnUrl);
+                exit;
+            }
             $days = max(1, min(365, (int)($_POST['days'] ?? 30)));
             header('Location: ' . strtok((string)($_SERVER['REQUEST_URI'] ?? 'pixl_stats.php'), '?') . '?days=' . $days);
             exit;

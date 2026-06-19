@@ -1,0 +1,1033 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>DashboardX2 · MySQL</title>
+<script>
+  (() => {
+    try {
+      const saved = localStorage.getItem("dashboardx2_theme");
+      const prefersDark = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
+      document.documentElement.setAttribute("data-theme", saved || (prefersDark ? "dark" : "light"));
+      const params = new URLSearchParams(location.search);
+      if (params.get("hide_recent") === "1") {
+        document.documentElement.setAttribute("data-hide-recent", "true");
+      }
+    } catch (error) {
+      document.documentElement.setAttribute("data-theme", "light");
+    }
+  })();
+</script>
+<style>
+  :root {
+    --bg: #f7f9fc;
+    --card: #ffffff;
+    --card2: #f3f6fa;
+    --line: #d1d6e3;
+    --line2: #c5ccda;
+    --txt: #0b0f14;
+    --mut: #626f81;
+    --ok: #42a15c;
+    --bad: #d95e6f;
+    --warn: #d1983a;
+    --accent: #38a3d1;
+    color-scheme: light dark;
+  }
+
+  :root[data-theme="dark"] {
+    --bg: #0b0f14;
+    --card: #121a24;
+    --card2: #0e1520;
+    --line: #1f2c3c;
+    --line2: #2a3b52;
+    --txt: #e9eef5;
+    --mut: #a9b7c9;
+    --ok: #42d392;
+    --bad: #ff5d7a;
+    --warn: #ffd166;
+    --accent: #0091c9;
+  }
+
+  :root[data-hide-recent="true"] .big {
+    display: none;
+  }
+
+  * {
+    box-sizing: border-box;
+    letter-spacing: 0;
+  }
+
+  body {
+    min-width: 320px;
+    margin: 0;
+    color: var(--txt);
+    background: var(--bg);
+    font: 14px/1.45 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+  }
+
+  a {
+    color: inherit;
+  }
+
+  .wrap {
+    width: 100%;
+    max-width: none;
+    margin: 0;
+    padding: 15px;
+  }
+
+  header {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 12px;
+  }
+
+  .title {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    min-width: 0;
+  }
+
+  h1 {
+    margin: 0;
+    font-size: 16px;
+    overflow-wrap: anywhere;
+  }
+
+  .sub,
+  .footer,
+  .empty,
+  .error {
+    color: var(--mut);
+    font-size: 12px;
+  }
+
+  .error {
+    color: var(--bad);
+    font-weight: 700;
+  }
+
+  .actions {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+  }
+
+  .btn,
+  input.btn {
+    min-height: 38px;
+    border: 1px solid var(--line2);
+    border-radius: 12px;
+    padding: 9px 12px;
+    color: var(--txt);
+    background: var(--card2);
+    font: inherit;
+    cursor: pointer;
+  }
+
+  .btn:hover {
+    filter: brightness(1.05);
+  }
+
+  .tog,
+  .pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    border: 1px solid var(--line2);
+    border-radius: 12px;
+    background: var(--card);
+  }
+
+  .tog {
+    min-height: 38px;
+    padding: 9px 12px;
+  }
+
+  .tog input {
+    accent-color: var(--accent);
+  }
+
+  .right {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+  }
+
+  .grid,
+  .charts,
+  .lists {
+    display: grid;
+    grid-template-columns: repeat(12, minmax(0, 1fr));
+    gap: 1rem;
+    align-items: start;
+  }
+
+  .grid {
+    width: 100%;
+  }
+
+  .grid > * {
+    min-width: 0;
+  }
+
+  .card,
+  .chart,
+  .list {
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    background: var(--card);
+  }
+
+  .card {
+    padding: 12px;
+  }
+
+  .card.overall {
+    border-color: var(--accent);
+  }
+
+  .kpi {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    min-height: 88px;
+  }
+
+  .kpi .k,
+  .kpi .d,
+  .chart h2,
+  .list h2,
+  .big h2 {
+    color: var(--mut);
+  }
+
+  .kpi .k {
+    font-size: 12px;
+  }
+
+  .kpi .v {
+    font-size: 22px;
+    font-weight: 700;
+    overflow-wrap: anywhere;
+  }
+
+  .kpi .d {
+    font-size: 12px;
+  }
+
+  .span2 {
+    grid-column: span 2;
+  }
+
+  .span6 {
+    grid-column: span 6;
+  }
+
+  .charts,
+  .lists,
+  .big {
+    margin-top: 10px;
+  }
+
+  .chart {
+    grid-column: span 4;
+    padding: 12px;
+  }
+
+  .chart h2,
+  .list h2,
+  .big h2 {
+    margin: 0 0 10px;
+    font-size: 13px;
+    font-weight: 600;
+  }
+
+  .chart-container {
+    position: relative;
+    height: 260px;
+  }
+
+  .chart-container canvas,
+  canvas {
+    width: 100% !important;
+    height: 100% !important;
+  }
+
+  .list {
+    grid-column: span 6;
+    padding: 12px;
+  }
+
+  .big .card {
+    padding: 0;
+  }
+
+  .scroll {
+    max-width: 100%;
+    overflow: auto;
+    border-radius: 16px;
+  }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+  }
+
+  th,
+  td {
+    padding: 8px;
+    border-bottom: 1px solid var(--line);
+    text-align: left;
+    vertical-align: middle;
+  }
+
+  th {
+    color: var(--mut);
+    font-weight: 600;
+    white-space: nowrap;
+  }
+
+  tbody tr:last-child td {
+    border-bottom: 0;
+  }
+
+  tbody tr:hover {
+    background: color-mix(in srgb, var(--accent) 8%, transparent);
+  }
+
+  .mono {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  }
+
+  .pill {
+    padding: 3px 8px;
+    font-size: 12px;
+  }
+
+  .pill.ok {
+    border-color: rgba(66, 211, 146, .35);
+  }
+
+  .pill.bad {
+    border-color: rgba(255, 93, 122, .35);
+  }
+
+  .pill.warn {
+    border-color: rgba(255, 209, 102, .35);
+  }
+
+  .status {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .status-dot {
+    width: 9px;
+    height: 9px;
+    border-radius: 999px;
+    background: var(--mut);
+    box-shadow: 0 0 0 4px color-mix(in srgb, var(--mut) 16%, transparent);
+  }
+
+  .status-dot.ok {
+    background: var(--ok);
+    box-shadow: 0 0 0 4px color-mix(in srgb, var(--ok) 16%, transparent);
+  }
+
+  .status-dot.warn {
+    background: var(--warn);
+    box-shadow: 0 0 0 4px color-mix(in srgb, var(--warn) 16%, transparent);
+  }
+
+  .url-cell {
+    min-width: 240px;
+    max-width: 460px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .ua-cell {
+    max-width: 320px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .number {
+    white-space: nowrap;
+  }
+
+  #tbl_big {
+    min-width: 1380px;
+  }
+
+  @media (max-width: 1100px) {
+    header {
+      align-items: flex-start;
+      flex-direction: column;
+    }
+
+    .actions {
+      justify-content: flex-start;
+    }
+
+    .span2 {
+      grid-column: span 4;
+    }
+
+    .chart,
+    .list {
+      grid-column: span 6;
+    }
+  }
+
+  @media (max-width: 700px) {
+    .wrap {
+      padding: 12px;
+    }
+
+    .actions,
+    .right {
+      width: 100%;
+    }
+
+    .right {
+      flex-wrap: wrap;
+    }
+
+    .btn,
+    input.btn,
+    .tog {
+      flex: 1 1 auto;
+    }
+
+    .span2,
+    .chart,
+    .list {
+      grid-column: span 12;
+    }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="title">
+      <h1>DashboardX2 · MySQL</h1>
+      <div class="sub">
+        Heute (Berlin): <span class="mono" id="todayDate">-</span>
+        · Now: <span class="mono" id="nowTime">-</span>
+        · Live: <span class="mono" id="liveState">OFF</span>
+        · <span class="status"><span class="status-dot" id="statusDot"></span><span id="statusText">Bereit</span></span>
+      </div>
+    </div>
+
+    <div class="actions">
+      <button class="btn" id="reloadBtn" type="button">Reload</button>
+      <button class="btn" id="themeToggle" type="button" title="Design umschalten">Theme</button>
+
+      <label class="tog" title="Alle 10 Sekunden neu laden">
+        <input id="ar" type="checkbox" checked>
+        <span>10s Reload</span>
+      </label>
+
+      <form id="filters" class="right">
+        <span class="pill" title="Tage fuer Charts">Tage</span>
+        <input class="btn" id="days" name="days" inputmode="numeric" value="30" style="width:82px">
+        <span class="pill" title="Anzahl Zeilen in der grossen Liste">Limit</span>
+        <input class="btn" id="limit" name="limit" inputmode="numeric" value="25" style="width:92px">
+        <button class="btn" type="submit">Apply</button>
+      </form>
+
+      <a class="btn" href="../pixl_stats.php#dashboardx2">Pixl Stats</a>
+    </div>
+  </header>
+
+  <div class="grid" id="kpiToday">
+    <div class="card kpi span2">
+      <div class="k">Echte Besucher (Heute)</div>
+      <div class="v" data-kpi="real_visitors_today">0</div>
+      <div class="d">human & no bot</div>
+    </div>
+    <div class="card kpi span2">
+      <div class="k">Seiten Impressionen (Heute)</div>
+      <div class="v" data-kpi="impressions_today">0</div>
+      <div class="d">Events gesamt</div>
+    </div>
+    <div class="card kpi span2">
+      <div class="k">Eindeutige Besucher (Heute)</div>
+      <div class="v" data-kpi="unique_ips_today">0</div>
+      <div class="d">Distinct visitor hash</div>
+    </div>
+    <div class="card kpi span2">
+      <div class="k">Bot Besuche (Heute)</div>
+      <div class="v" data-kpi="bot_visits_today">0</div>
+      <div class="d">is_bot=1</div>
+    </div>
+    <div class="card kpi span2">
+      <div class="k">Verschiedene Seiten (Heute)</div>
+      <div class="v" data-kpi="unique_pages_today">0</div>
+      <div class="d">Distinct URL</div>
+    </div>
+    <div class="card kpi span2">
+      <div class="k">Besucher/Minute</div>
+      <div class="v" data-kpi="avg_visitors_per_min">0</div>
+      <div class="d">letzte 60 Min</div>
+    </div>
+  </div>
+
+  <div class="grid" id="kpiOverall" style="margin-top:10px">
+    <div class="card kpi span2 overall">
+      <div class="k">Echte Besucher (Gesamt)</div>
+      <div class="v" data-kpi="real_visitors_total">0</div>
+      <div class="d">human & no bot</div>
+    </div>
+    <div class="card kpi span2 overall">
+      <div class="k">Seiten Impressionen (Gesamt)</div>
+      <div class="v" data-kpi="impressions_total">0</div>
+      <div class="d">Events gesamt</div>
+    </div>
+    <div class="card kpi span2 overall">
+      <div class="k">Eindeutige Besucher (Gesamt)</div>
+      <div class="v" data-kpi="unique_ips_total">0</div>
+      <div class="d">Distinct visitor hash</div>
+    </div>
+    <div class="card kpi span2 overall">
+      <div class="k">Bot Besuche (Gesamt)</div>
+      <div class="v" data-kpi="bot_visits_total">0</div>
+      <div class="d">is_bot=1</div>
+    </div>
+    <div class="card kpi span2 overall">
+      <div class="k">Verschiedene Seiten (Gesamt)</div>
+      <div class="v" data-kpi="unique_pages_total">0</div>
+      <div class="d">Distinct URL</div>
+    </div>
+    <div class="card kpi span2 overall">
+      <div class="k">Score (Gesamt)</div>
+      <div class="v" data-kpi="avg_score_total">0</div>
+      <div class="d">Durchschnitt Score</div>
+    </div>
+  </div>
+
+  <div class="charts">
+    <div class="chart">
+      <h2>Diagramm: Besucher pro Tag</h2>
+      <div class="chart-container"><canvas id="c_vis"></canvas></div>
+    </div>
+    <div class="chart">
+      <h2>Diagramm: Top Referrer (letzte 24h)</h2>
+      <div class="chart-container"><canvas id="c_ref"></canvas></div>
+    </div>
+    <div class="chart">
+      <h2>Diagramm: Browser (letzte 24h)</h2>
+      <div class="chart-container"><canvas id="c_browser"></canvas></div>
+    </div>
+    <div class="chart">
+      <h2>Diagramm: Betriebssysteme (letzte 24h)</h2>
+      <div class="chart-container"><canvas id="c_os"></canvas></div>
+    </div>
+    <div class="chart">
+      <h2>Diagramm: Sprachen (letzte 24h)</h2>
+      <div class="chart-container"><canvas id="c_lang"></canvas></div>
+    </div>
+    <div class="chart">
+      <h2>Diagramm: Bildschirmaufloesungen (letzte 24h)</h2>
+      <div class="chart-container"><canvas id="c_res"></canvas></div>
+    </div>
+  </div>
+
+  <div class="lists">
+    <section class="list">
+      <h2>Top 10 Heute</h2>
+      <div class="scroll">
+        <table id="tbl_top_today">
+          <thead><tr><th>#</th><th>URL</th><th>Count</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="list">
+      <h2>Top 10 Gesamt</h2>
+      <div class="scroll">
+        <table id="tbl_top_total">
+          <thead><tr><th>#</th><th>URL</th><th>Count</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+  </div>
+
+  <section class="big">
+    <h2 id="bigTitle">Top 25 · Letzte Zugriffe</h2>
+    <div class="card">
+      <div class="scroll">
+        <table id="tbl_big">
+          <thead>
+            <tr>
+              <th>Letzter Zugriff</th>
+              <th>vid</th>
+              <th>ip hash</th>
+              <th>lang</th>
+              <th>url</th>
+              <th>referrer</th>
+              <th>Mensch</th>
+              <th>Score</th>
+              <th>DWell</th>
+              <th>Bot</th>
+              <th>DC</th>
+              <th>Visits</th>
+              <th>Unique24h</th>
+              <th>Visits24h</th>
+              <th>Visits Total</th>
+              <th>REG</th>
+              <th>ML</th>
+              <th>G</th>
+              <th>Gate</th>
+              <th>Tracked</th>
+              <th>UserAgent</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <div class="footer" id="meta">MySQL dashboard via pixl_stats.php</div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script>
+(() => {
+  "use strict";
+
+  const API_PATH = "../pixl_stats.php";
+  const AUTO_REFRESH_MS = 10000;
+  const STORE_KEY = "dashboardx2_mysql_state";
+  const numberFmt = new Intl.NumberFormat("de-DE");
+  const decimalFmt = new Intl.NumberFormat("de-DE", { maximumFractionDigits: 4 });
+  const dateFmt = new Intl.DateTimeFormat("sv-SE", {
+    timeZone: "Europe/Berlin",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false
+  });
+
+  const colors = {
+    cyan: "#00f5d4",
+    magenta: "#f72585",
+    violet: "#7b2cbf",
+    orange: "#ff6b35",
+    blue: "#4361ee"
+  };
+
+  const el = {
+    ar: document.getElementById("ar"),
+    days: document.getElementById("days"),
+    limit: document.getElementById("limit"),
+    filters: document.getElementById("filters"),
+    reload: document.getElementById("reloadBtn"),
+    theme: document.getElementById("themeToggle"),
+    today: document.getElementById("todayDate"),
+    now: document.getElementById("nowTime"),
+    live: document.getElementById("liveState"),
+    statusDot: document.getElementById("statusDot"),
+    statusText: document.getElementById("statusText"),
+    meta: document.getElementById("meta"),
+    bigTitle: document.getElementById("bigTitle")
+  };
+
+  const charts = {};
+  let timer = null;
+  let inFlight = false;
+  let clockOffsetMs = 0;
+
+  function clampInt(value, fallback, min, max) {
+    const parsed = Number.parseInt(String(value || ""), 10);
+    if (!Number.isFinite(parsed)) return fallback;
+    return Math.max(min, Math.min(max, parsed));
+  }
+
+  function h(value) {
+    return String(value ?? "").replace(/[&<>"']/g, (char) => ({
+      "&": "&amp;",
+      "<": "&lt;",
+      ">": "&gt;",
+      "\"": "&quot;",
+      "'": "&#039;"
+    }[char]));
+  }
+
+  function shortText(value, max = 90) {
+    const text = String(value || "").trim();
+    if (!text) return "-";
+    return text.length > max ? text.slice(0, Math.max(1, max - 1)) + "..." : text;
+  }
+
+  function hashShort(value) {
+    const text = String(value || "");
+    return text ? text.slice(0, 12) : "-";
+  }
+
+  function formatDate(value) {
+    const raw = String(value || "").trim();
+    if (!raw) return "-";
+    const iso = raw.includes("T") ? raw : raw.replace(" ", "T") + "Z";
+    const date = new Date(iso);
+    if (Number.isNaN(date.getTime())) return raw;
+    return date.toLocaleString("de-DE", {
+      year: "2-digit",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit"
+    });
+  }
+
+  function formatSecondsFromMs(value) {
+    const n = Number(value);
+    if (!Number.isFinite(n)) return "-";
+    return numberFmt.format(Math.round(n / 1000)) + "s";
+  }
+
+  function formatKpi(value, key) {
+    const n = Number(value);
+    if (!Number.isFinite(n)) return String(value ?? "-");
+    if (key.includes("avg") || key === "avg_score_total") {
+      return decimalFmt.format(n);
+    }
+    return numberFmt.format(Math.round(n));
+  }
+
+  function setStatus(type, text) {
+    el.statusDot.className = "status-dot" + (type ? " " + type : "");
+    el.statusText.textContent = text;
+  }
+
+  function renderNow() {
+    const d = new Date(Date.now() + clockOffsetMs);
+    const nowText = dateFmt.format(d).replace(",", "");
+    el.now.textContent = nowText;
+    el.today.textContent = nowText.slice(0, 10);
+  }
+
+  function getTheme() {
+    return document.documentElement.getAttribute("data-theme") || "light";
+  }
+
+  function applyTheme(theme) {
+    document.documentElement.setAttribute("data-theme", theme);
+    try {
+      localStorage.setItem("dashboardx2_theme", theme);
+    } catch (error) {}
+    el.theme.textContent = theme === "dark" ? "Light" : "Dark";
+    if (window.Chart) {
+      Chart.defaults.color = theme === "dark" ? "#a9b7c9" : "#626f81";
+      Chart.defaults.borderColor = theme === "dark" ? "rgba(255,255,255,0.05)" : "rgba(11,15,20,0.08)";
+      for (const chart of Object.values(charts)) {
+        if (chart) chart.update("none");
+      }
+    }
+  }
+
+  function loadState() {
+    const query = new URLSearchParams(location.search);
+    let stored = {};
+    try {
+      stored = JSON.parse(localStorage.getItem(STORE_KEY) || "{}");
+    } catch (error) {
+      stored = {};
+    }
+    el.days.value = String(clampInt(query.get("days") || stored.days, 30, 1, 365));
+    el.limit.value = String(clampInt(query.get("limit") || stored.limit, 25, 1, 500));
+    el.ar.checked = query.has("ar") ? query.get("ar") !== "0" : stored.ar !== false;
+    el.live.textContent = el.ar.checked ? "ON" : "OFF";
+  }
+
+  function saveState() {
+    try {
+      localStorage.setItem(STORE_KEY, JSON.stringify({
+        days: clampInt(el.days.value, 30, 1, 365),
+        limit: clampInt(el.limit.value, 25, 1, 500),
+        ar: el.ar.checked
+      }));
+    } catch (error) {}
+  }
+
+  function updateAddressBar() {
+    const params = new URLSearchParams(location.search);
+    params.set("days", String(clampInt(el.days.value, 30, 1, 365)));
+    params.set("limit", String(clampInt(el.limit.value, 25, 1, 500)));
+    params.set("ar", el.ar.checked ? "1" : "0");
+    history.replaceState(null, "", location.pathname + "?" + params.toString());
+  }
+
+  function apiUrl() {
+    const url = new URL(API_PATH, location.href);
+    url.searchParams.set("dashboardx2_json", "1");
+    url.searchParams.set("days", String(clampInt(el.days.value, 30, 1, 365)));
+    url.searchParams.set("limit", String(clampInt(el.limit.value, 25, 1, 500)));
+    return url;
+  }
+
+  function loginUrl() {
+    const url = new URL(API_PATH, location.href);
+    url.search = "";
+    url.searchParams.set("return", "stat/dashboardx2.html" + location.search);
+    return url;
+  }
+
+  function openLogin() {
+    stop();
+    setStatus("warn", "Anmeldung erforderlich...");
+    el.meta.textContent = "Weiterleitung zum Pixl-Statistik-Login...";
+    location.assign(loginUrl().toString());
+  }
+
+  function updateKpis(kpi) {
+    document.querySelectorAll("[data-kpi]").forEach((node) => {
+      const key = node.getAttribute("data-kpi") || "";
+      if (Object.prototype.hasOwnProperty.call(kpi, key)) {
+        node.textContent = formatKpi(kpi[key], key);
+      }
+    });
+  }
+
+  function tableEmpty(table, colSpan, text) {
+    const tbody = table.tBodies[0] || table.createTBody();
+    tbody.innerHTML = `<tr><td class="empty" colspan="${colSpan}">${h(text)}</td></tr>`;
+  }
+
+  function renderTopTable(tableId, rows) {
+    const table = document.getElementById(tableId);
+    const tbody = table.tBodies[0] || table.createTBody();
+    tbody.innerHTML = "";
+    if (!Array.isArray(rows) || rows.length === 0) {
+      tableEmpty(table, 3, "Keine Daten.");
+      return;
+    }
+    rows.forEach((row, index) => {
+      const url = String(row.url || "/");
+      tbody.insertAdjacentHTML("beforeend", `
+        <tr>
+          <td class="mono">${index + 1}</td>
+          <td class="url-cell" title="${h(url)}">${h(shortText(url, 110))}</td>
+          <td class="mono number">${h(numberFmt.format(Number(row.count || 0)))}</td>
+        </tr>
+      `);
+    });
+  }
+
+  function pill(isBot, human) {
+    const cls = isBot ? "bad" : (human ? "ok" : "warn");
+    const text = isBot ? "Bot" : (human ? "Human" : "Unknown");
+    return `<span class="pill ${cls}">${text}</span>`;
+  }
+
+  function renderBig(rows, limit) {
+    const table = document.getElementById("tbl_big");
+    const tbody = table.tBodies[0] || table.createTBody();
+    tbody.innerHTML = "";
+    el.bigTitle.textContent = `Top ${limit} · Letzte Zugriffe`;
+    if (!Array.isArray(rows) || rows.length === 0) {
+      tableEmpty(table, 21, "Keine Daten.");
+      return;
+    }
+    rows.forEach((row) => {
+      const isBot = Number(row.bot || 0) === 1;
+      const human = Number(row.human || 0) === 1;
+      const url = String(row.url || "/");
+      const referrer = String(row.referrer || "");
+      const ua = String(row.ua || "");
+      const score = Number(row.score);
+      const ml = Number(row.ml_score);
+      const g = Number(row.g_score);
+      tbody.insertAdjacentHTML("beforeend", `
+        <tr>
+          <td class="mono">${h(formatDate(row.created_at))}</td>
+          <td class="mono">${h(hashShort(row.visitor_hash))}</td>
+          <td class="mono">${h(hashShort(row.ip_hash))}</td>
+          <td>${h(row.lang || "-")}</td>
+          <td class="url-cell" title="${h(url)}">${h(shortText(url, 70))}</td>
+          <td class="url-cell" title="${h(referrer)}">${h(shortText(referrer || "-", 60))}</td>
+          <td>${pill(isBot, human)}</td>
+          <td class="mono number">${Number.isFinite(score) ? h(score.toFixed(2)) : "-"}</td>
+          <td class="mono number">${h(formatSecondsFromMs(row.dwell_ms))}</td>
+          <td class="mono">${isBot ? "1" : "0"}</td>
+          <td class="mono">${Number(row.dc || 0) ? "1" : "0"}</td>
+          <td class="mono number">${h(numberFmt.format(Number(row.visits_total || 1)))}</td>
+          <td class="mono number">${h(numberFmt.format(Number(row.unique24h || 0)))}</td>
+          <td class="mono number">${h(numberFmt.format(Number(row.visits_24h || 0)))}</td>
+          <td class="mono number">${h(numberFmt.format(Number(row.visits_total || 0)))}</td>
+          <td>${h(row.reg || "-")}</td>
+          <td class="mono number">${Number.isFinite(ml) ? h(ml.toFixed(2)) : "-"}</td>
+          <td class="mono number">${Number.isFinite(g) ? h(g.toFixed(3)) : "-"}</td>
+          <td class="mono">${Number(row.gate_ok || 0) ? "1" : "0"}</td>
+          <td class="mono">${Number(row.tracked || 0) ? "1" : "0"}</td>
+          <td class="ua-cell" title="${h(ua)}">${h(shortText(ua, 72))}</td>
+        </tr>
+      `);
+    });
+  }
+
+  function chartData(data) {
+    return {
+      labels: Array.isArray(data && data.labels) ? data.labels : [],
+      values: Array.isArray(data && data.values) ? data.values.map((value) => Number(value) || 0) : []
+    };
+  }
+
+  function createCharts() {
+    if (!window.Chart) return;
+    Chart.defaults.color = getTheme() === "dark" ? "#a9b7c9" : "#626f81";
+    Chart.defaults.borderColor = getTheme() === "dark" ? "rgba(255,255,255,0.05)" : "rgba(11,15,20,0.08)";
+
+    charts.vis = new Chart(document.getElementById("c_vis"), {
+      type: "line",
+      data: { labels: [], datasets: [{ label: "Besucher", data: [], borderColor: colors.cyan, backgroundColor: "rgba(0,245,212,0.10)", fill: true, tension: .4, borderWidth: 2, pointRadius: 2 }] },
+      options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { x: { grid: { display: false } }, y: { beginAtZero: true } } }
+    });
+
+    charts.ref = new Chart(document.getElementById("c_ref"), {
+      type: "doughnut",
+      data: { labels: [], datasets: [{ data: [], backgroundColor: [colors.cyan, colors.magenta, colors.violet, colors.orange, colors.blue, "#666"], borderWidth: 0 }] },
+      options: { responsive: true, maintainAspectRatio: false, cutout: "60%", plugins: { legend: { position: "right" } } }
+    });
+
+    const mkHBar = (id, color) => new Chart(document.getElementById(id), {
+      type: "bar",
+      data: { labels: [], datasets: [{ data: [], backgroundColor: color, borderRadius: 4 }] },
+      options: { indexAxis: "y", responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { x: { beginAtZero: true }, y: { grid: { display: false } } } }
+    });
+
+    charts.browser = mkHBar("c_browser", colors.cyan);
+    charts.os = mkHBar("c_os", colors.magenta);
+    charts.lang = mkHBar("c_lang", colors.violet);
+    charts.res = mkHBar("c_res", colors.orange);
+  }
+
+  function updateChart(chart, data) {
+    if (!chart) return;
+    const next = chartData(data);
+    chart.data.labels = next.labels;
+    chart.data.datasets[0].data = next.values;
+    chart.update("none");
+  }
+
+  function updateCharts(data) {
+    updateChart(charts.vis, data.vis);
+    updateChart(charts.ref, data.ref);
+    updateChart(charts.browser, data.browser);
+    updateChart(charts.os, data.os);
+    updateChart(charts.lang, data.lang);
+    updateChart(charts.res, data.res);
+  }
+
+  async function pullOnce() {
+    if (inFlight) return;
+    inFlight = true;
+    setStatus("", "Lade...");
+    try {
+      const response = await fetch(apiUrl(), {
+        credentials: "same-origin",
+        cache: "no-store",
+        headers: { "Accept": "application/json" }
+      });
+      const contentType = response.headers.get("content-type") || "";
+      if (response.status === 401 || response.status === 403) {
+        openLogin();
+        return;
+      }
+      if (!response.ok) throw new Error("HTTP " + response.status);
+      if (!contentType.includes("application/json")) {
+        openLogin();
+        return;
+      }
+      const payload = await response.json();
+      const dash = payload.dashboardx2 || {};
+      if (!payload.ok || !dash.ok) {
+        throw new Error(dash.error || "DashboardX2 Daten nicht verfuegbar.");
+      }
+
+      updateKpis(dash.kpi || {});
+      updateCharts(dash.charts || {});
+      renderTopTable("tbl_top_today", dash.topPagesToday || []);
+      renderTopTable("tbl_top_total", dash.topPagesTotal || []);
+      renderBig(dash.recent || [], Number(payload.limit || clampInt(el.limit.value, 25, 1, 500)));
+      el.meta.textContent = `Tabelle ${payload.table} · ${payload.days} Tage · Limit ${payload.limit} · ${formatDate(payload.generatedAt)}`;
+      setStatus("ok", "Aktualisiert");
+      if (payload.generatedAt) {
+        const t = Date.parse(payload.generatedAt);
+        if (!Number.isNaN(t)) clockOffsetMs = t - Date.now();
+      }
+      renderNow();
+    } catch (error) {
+      setStatus("warn", error.message || "Fehler beim Laden");
+      el.meta.textContent = error.message || "Fehler beim Laden";
+      tableEmpty(document.getElementById("tbl_big"), 21, error.message || "Fehler beim Laden.");
+    } finally {
+      inFlight = false;
+    }
+  }
+
+  function start() {
+    stop();
+    pullOnce();
+    timer = setInterval(pullOnce, AUTO_REFRESH_MS);
+  }
+
+  function stop() {
+    if (timer) clearInterval(timer);
+    timer = null;
+  }
+
+  function syncAuto() {
+    el.live.textContent = el.ar.checked ? "ON" : "OFF";
+    updateAddressBar();
+    saveState();
+    if (el.ar.checked) start();
+    else {
+      stop();
+      pullOnce();
+    }
+  }
+
+  el.filters.addEventListener("submit", (event) => {
+    event.preventDefault();
+    el.days.value = String(clampInt(el.days.value, 30, 1, 365));
+    el.limit.value = String(clampInt(el.limit.value, 25, 1, 500));
+    updateAddressBar();
+    saveState();
+    pullOnce();
+  });
+
+  el.reload.addEventListener("click", () => pullOnce());
+  el.ar.addEventListener("change", syncAuto);
+  el.theme.addEventListener("click", () => applyTheme(getTheme() === "dark" ? "light" : "dark"));
+
+  setInterval(renderNow, 1000);
+  loadState();
+  createCharts();
+  applyTheme(getTheme());
+  renderNow();
+  syncAuto();
+})();
+</script>
+</body>
+</html>

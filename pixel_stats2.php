@@ -459,7 +459,7 @@ function pixel_push_event_payload(array $row): array
 function pixel_push_fetch_event(PDO $pdo, int $eventId): ?array
 {
     $table = pixl_table_name();
-    $stmt = $pdo->prepare("SELECT id, created_at, reason, title, hostname, path, browser, os, device,
+    $stmt = $pdo->prepare("SELECT id, created_at, reason, title, hostname, page_url, path, browser, os, device,
             country, session_duration, is_bot, bot_score, bot_name
         FROM `$table`
         WHERE id = :id
@@ -530,7 +530,7 @@ function pixel_push_notify_event(PDO $pdo, int $eventId): void
     try {
         pixel_push_ensure_schema($pdo);
         $row = pixel_push_fetch_event($pdo, $eventId);
-        if (!$row) {
+        if (!$row || !pixl_event_matches_configured_stats_url($row)) {
             return;
         }
         pixel_push_send_payload_to_all($pdo, pixel_push_event_payload($row));

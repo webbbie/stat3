@@ -1,5 +1,5 @@
 /**
- * pixl6.js v2.14 - SQL analytics collector with compact Reading seconds
+ * pixl77.js v2.16 - MySQL analytics collector and dashboard tracker
  * - Fingerprint-Schranke (Browser/OS/Country) statt IP-Exclude
  * - Alle externen Abfrage-Services (z.B. ipify) entfernt
  * - Sendet strukturierte Statistikdaten an den eigenen PHP/MySQL-Collector
@@ -12,7 +12,7 @@
   // CONFIGURATION
   // ================
   const CONFIG = Object.freeze({
-    VERSION: "2.14-sql-stats-collector",
+    VERSION: "2.16-pixl77-mysql",
 
     // Debug-Modus
     DEBUG: {
@@ -34,7 +34,7 @@
     /**
      * Fingerprint-Exclude:
      * Wenn ENABLED = true und alle gesetzten Felder matchen,
-     * wird pixl6.js normalerweise nicht gestartet. DEBUG.BYPASS_FILTERS kann das deaktivieren.
+     * wird pixl77.js normalerweise nicht gestartet. DEBUG.BYPASS_FILTERS kann das deaktivieren.
      *
      * BROWSER_IS: "chrome" | "safari" | "firefox" | "edge" | ...
      *   -> Vergleich ist case-insensitive und als substring
@@ -55,7 +55,7 @@
 
     // SQL/PHP Collector auf dem eigenen Webspace.
     // pixl_collect.php speichert die Events in MySQL; pixl_stats.php zeigt sie an.
-    SQL_ENDPOINT: "https://www.bayerchristian.de/pixl_collect.php",
+    SQL_ENDPOINT: "https://www.bayerchristian.de/stats3/pixl_collect.php",
     SQL_SITE_ID: "www.bayerchristian.de",
     SQL_PUBLIC_KEY: "",
 
@@ -123,7 +123,7 @@
       // Zusätzlich domainweit innerhalb des Browsers sperren.
       // Wirkt über Reloads, erneut geöffnete Tabs und parallele Tabs hinweg.
       SESSION_COOLDOWN_MS: 10 * 60 * 1000,
-      GLOBAL_COOLDOWN_KEY: "__pixl6GlobalLastSubmitTsV1",
+      GLOBAL_COOLDOWN_KEY: "__pixl77GlobalLastSubmitTsV1",
 
       // Tracker in eingebetteten iframes nicht erneut starten.
       BLOCK_IFRAMES: true,
@@ -150,8 +150,9 @@
       // Browser-Retry deaktiviert: verhindert erneute Zustellung alter Events
       // nach einem Reload, wenn ein Request beim Verlassen unsicher war.
       RETRY_QUEUE_ENABLED: false,
-      RETRY_QUEUE_KEY: "__pixl6ReliableQueueV1",
+      RETRY_QUEUE_KEY: "__pixl77ReliableQueueV1",
       RETRY_QUEUE_LEGACY_KEYS: [
+        "__pixl6ReliableQueueV1",
         "__pixl5ReliableQueueV2",
         "__pixl5OriginalReliableQueueV1"
       ],
@@ -195,20 +196,20 @@
   });
 
   const RC_OVERLAY_SESSION_KEY = "__rcOverlaySession";
-  const SESSION_NOTIFICATION_COUNT_KEY = "__pixl6SubmitCount";
-  const SESSION_LAST_NOTIFICATION_KEY = "__pixl6LastSubmitTs";
+  const SESSION_NOTIFICATION_COUNT_KEY = "__pixl77SubmitCount";
+  const SESSION_LAST_NOTIFICATION_KEY = "__pixl77LastSubmitTs";
   const SCRIPT_NAME = (() => {
     try {
       const script = typeof document !== "undefined" && document.currentScript;
       const src = script && script.getAttribute("src");
       if (src) {
         const url = new URL(src, location.href);
-        return url.pathname.split("/").pop() || "pixl6.js";
+        return url.pathname.split("/").pop() || "pixl77.js";
       }
     } catch {
       // ignore
     }
-    return "pixl6.js";
+    return "pixl77.js";
   })();
 
   function readV3UserScore() {
@@ -509,7 +510,7 @@
       try {
         if (typeof window === "undefined") return null;
         const store = window[type];
-        const key = "__pixl6_storage_test__";
+        const key = "__pixl77_storage_test__";
         store.setItem(key, "1");
         store.removeItem(key);
         return store;
@@ -788,7 +789,7 @@
 
     const debug = CONFIG.DEBUG && CONFIG.DEBUG.ENABLED;
     if (debug) {
-      console.log("[pixl6] Fingerprint:", { browser, os, country });
+      console.log("[pixl77] Fingerprint:", { browser, os, country });
     }
 
     return rules.some((cfg) => {
@@ -813,7 +814,7 @@
       const exclude = browserMatch && osMatch && countryMatch;
 
       if (exclude && debug) {
-        console.log("[pixl6] Fingerprint-Exclude active - pixl6.js stops here.");
+        console.log("[pixl77] Fingerprint-Exclude active - pixl77.js stops here.");
       }
 
       return exclude;
@@ -1929,7 +1930,7 @@
         const detector = new DeviceDetector();
         const fp = getFingerprint();
         const reason = String(eventName || "TEST").toUpperCase();
-        const title = `pixl6 SQL: ${reason}`;
+        const title = `pixl77 MySQL: ${reason}`;
         const message = [
           `${reason}: ${fp.browser} / ${fp.os} / ${fp.device}`,
           `Lang: ${fp.lang}`,
@@ -2035,12 +2036,13 @@
       }
     }
 
-    if (window.__pixl6Initialized || window.__pixl5Initialized) return;
+    if (window.__pixl77Initialized || window.__pixl6Initialized || window.__pixl5Initialized) return;
+    window.__pixl77Initialized = true;
     window.__pixl6Initialized = true;
     window.__pixl5Initialized = true;
 
     // Fingerprint-Schranke:
-    // Wenn Browser/OS/Country matchen -> pixl6 läuft normalerweise nicht.
+    // Wenn Browser/OS/Country matchen -> pixl77 läuft normalerweise nicht.
     if (isFingerprintExcluded()) {
       return;
     }

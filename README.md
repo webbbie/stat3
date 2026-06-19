@@ -6,7 +6,7 @@ It replaces the older Pushover notification flow with SQL statistics, browser no
 
 ## Features
 
-- Drop-in `pixl6.js` and `pixl77.js` tracker files
+- Drop-in `pixl77.js` MySQL tracker file
 - PHP/MySQL collector endpoint
 - Password-protected dashboard with auto-login cookie
 - Browser notifications for new events
@@ -21,8 +21,7 @@ It replaces the older Pushover notification flow with SQL statistics, browser no
 ## Project Files
 
 ```text
-pixl6.js                 Browser tracker
-pixl77.js                Compatibility copy of pixl6.js
+pixl77.js                Browser tracker for the PHP/MySQL collector
 pixl_collect.php         Event collector and tracking pixel endpoint
 pixl_server.php          Shared config, MySQL, auth, schema, bot detection
 pixl_stats.php           Statistics dashboard and notification feed
@@ -44,13 +43,13 @@ docs/API.md              Collector and dashboard endpoints
 4. Include the tracker:
 
 ```html
-<script src="https://example.com/pixl6.js" defer></script>
+<script src="https://example.com/stats3/pixl77.js" defer></script>
 ```
 
 5. Open the dashboard:
 
 ```text
-https://example.com/pixl_stats.php
+https://example.com/stats3/pixl_stats.php
 ```
 
 The database table is created automatically on the first collector or dashboard request.
@@ -66,7 +65,7 @@ docs/IONOS.md
 Use `pixl_config.ionos.example.php` as the template for `pixl_config.php`. After upload, open:
 
 ```text
-https://www.bayerchristian.de/pixl_setup_check.php
+https://www.bayerchristian.de/stats3/pixl_setup_check.php
 ```
 
 The setup check verifies PHP, PDO MySQL, the database connection, and automatic table creation.
@@ -84,7 +83,7 @@ No PHP or MySQL is needed on `www.inconsequential.org` for this file. It is only
 The JavaScript runs inside the page where it is embedded, but it sends events to the PHP/MySQL collector on `www.bayerchristian.de`:
 
 ```text
-https://www.bayerchristian.de/pixl_collect.php
+https://www.bayerchristian.de/stats3/pixl_collect.php
 ```
 
 Use a local file only for development, for example `./pixl77.js` in `demo.html`. The production version should be loaded from the static webspace URL above, not pasted inline.
@@ -98,7 +97,7 @@ If another domain embeds `https://www.inconsequential.org/files/src/pixl77.js`, 
 
 ```html
 <noscript>
-  <img src="https://example.com/pixl_collect.php?pixel=1" width="1" height="1" alt="">
+  <img src="https://example.com/stats3/pixl_collect.php?pixel=1" width="1" height="1" alt="">
 </noscript>
 ```
 
@@ -155,7 +154,6 @@ php -l pixl_stats.php
 php -l pixel_stats2.php
 php -l pixl_setup_check.php
 node --check pixel_webpush_sw.js
-node --check pixl6.js
 node --check pixl77.js
 ```
 
