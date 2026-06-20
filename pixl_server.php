@@ -831,6 +831,46 @@ function pixl_insert_event(PDO $pdo, array $payload): int
     $userAgent = pixl_string(pixl_get($payload, ['context', 'userAgent'], $_SERVER['HTTP_USER_AGENT'] ?? ''), 0);
     $bot = pixl_detect_bot($userAgent, $payload);
     $ip = pixl_remote_ip();
+    $visitorHash = pixl_hash($ip . '|' . $userAgent);
+    $ipHash = pixl_hash($ip);
+    $pageUrl = pixl_string(pixl_get($payload, ['page', 'url'], ''), 0);
+    $pagePath = pixl_string(pixl_get($payload, ['page', 'path'], ''), 1024);
+    if ($pagePath === '' && $pageUrl !== '') {
+        $parsedPath = parse_url($pageUrl, PHP_URL_PATH);
+        $pagePath = is_string($parsedPath) && $parsedPath !== '' ? $parsedPath : '/';
+    }
+    $normalizedPagePath = parse_url($pagePath !== '' ? $pagePath : '/', PHP_URL_PATH);
+    $pagePath = is_string($normalizedPagePath) && $normalizedPagePath !== '' ? $normalizedPagePath : '/';
+
+    $pageRecountMinutes = pixl_nullable_int(pixl_get($payload, ['session', 'pageRecountMinutes']));
+    if ($pageRecountMinutes !== null && $pageRecountMinutes > 0 && $hostname !== '' && $visitorHash !== '') {
+        $pageRecountMinutes = max(1, min(1440, $pageRecountMinutes));
+        $pathExpression = pixl_sql_path_expression();
+        $sessionStmt = $pdo->prepare(
+            "SELECT `event_id` FROM `$table`
+             WHERE `visitor_hash` = :session_visitor_hash
+               AND LOWER(`hostname`) = :session_hostname
+               AND $pathExpression = :session_path
+               AND `created_at` >= UTC_TIMESTAMP() - INTERVAL $pageRecountMinutes MINUTE
+             ORDER BY `id` DESC
+             LIMIT 1"
+        );
+        $sessionStmt->execute([
+            ':session_visitor_hash' => $visitorHash,
+            ':session_hostname' => strtolower($hostname),
+            ':session_path' => $pagePath,
+        ]);
+        $existingEventId = $sessionStmt->fetchColumn();
+        if (is_string($existingEventId) && $existingEventId !== '') {
+            $eventId = $existingEventId;
+            $payload['eventId'] = $eventId;
+            if (!isset($payload['session']) || !is_array($payload['session'])) {
+                $payload['session'] = [];
+            }
+            $payload['session']['reused'] = true;
+        }
+    }
+
     $params = [
         ':event_id' => $eventId,
         ':sent_at' => pixl_parse_sent_at(pixl_get($payload, ['sentAt'])),
@@ -838,8 +878,8 @@ function pixl_insert_event(PDO $pdo, array $payload): int
         ':reason' => pixl_string(pixl_get($payload, ['reason'], ''), 40),
         ':title' => pixl_string(pixl_get($payload, ['title'], ''), 255),
         ':hostname' => $hostname,
-        ':page_url' => pixl_string(pixl_get($payload, ['page', 'url'], ''), 0),
-        ':path' => pixl_string(pixl_get($payload, ['page', 'path'], ''), 1024),
+        ':page_url' => $pageUrl,
+        ':path' => $pagePath,
         ':referrer' => pixl_string(pixl_get($payload, ['page', 'referrer'], ''), 0),
         ':browser' => pixl_string(pixl_get($payload, ['context', 'browser'], ''), 80),
         ':os' => pixl_string(pixl_get($payload, ['context', 'os'], ''), 80),
@@ -864,8 +904,8 @@ function pixl_insert_event(PDO $pdo, array $payload): int
         ':bot_category' => pixl_string($bot['category'], 80),
         ':bot_name' => pixl_string($bot['name'], 120),
         ':bot_reasons' => implode(', ', $bot['reasons']),
-        ':visitor_hash' => pixl_hash($ip . '|' . $userAgent),
-        ':ip_hash' => pixl_hash($ip),
+        ':visitor_hash' => $visitorHash,
+        ':ip_hash' => $ipHash,
         ':request_method' => pixl_string($_SERVER['REQUEST_METHOD'] ?? '', 12),
         ':request_uri' => pixl_string($_SERVER['REQUEST_URI'] ?? '', 0),
         ':user_agent' => $userAgent,
@@ -876,17 +916,26 @@ function pixl_insert_event(PDO $pdo, array $payload): int
     $columns = array_map(static function (string $key): string {
         return substr($key, 1);
     }, array_keys($params));
+    $updateColumns = array_values(array_filter($columns, static function (string $column): bool {
+        return !in_array($column, ['event_id', 'visitor_hash', 'ip_hash'], true);
+    }));
+    $updates = array_map(static function (string $column): string {
+        return sprintf('`%1$s` = VALUES(`%1$s`)', $column);
+    }, $updateColumns);
     $sql = sprintf(
-        'INSERT IGNORE INTO `%s` (`%s`) VALUES (%s)',
+        'INSERT INTO `%s` (`%s`) VALUES (%s) ON DUPLICATE KEY UPDATE %s',
         $table,
         implode('`, `', $columns),
-        implode(', ', array_keys($params))
+        implode(', ', array_keys($params)),
+        implode(', ', $updates)
     );
 
     $stmt = $pdo->prepare($sql);
     $stmt->execute($params);
 
-    if ($stmt->rowCount() < 1) {
+    // Nur der erste VISIT erzeugt eine neue Zeile und darf Push ausloesen.
+    // READ und LEAVE aktualisieren dieselbe event_id und liefern deshalb 0.
+    if ($stmt->rowCount() !== 1) {
         return 0;
     }
 

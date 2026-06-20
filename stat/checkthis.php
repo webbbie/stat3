@@ -205,6 +205,7 @@ $gapMinutes = check_int($_GET['gap'] ?? null, CHECK_GAP_MINUTES_DEFAULT, 5, 240)
 $rowLimit = check_int($_GET['limit'] ?? null, CHECK_ROW_LIMIT_DEFAULT, 1000, CHECK_ROW_LIMIT_MAX);
 $maxLevel = check_int($_GET['levels'] ?? null, CHECK_MAX_LEVEL_DEFAULT, 2, 12);
 $audience = check_audience($_GET['audience'] ?? null);
+$isEmbed = isset($_GET['embed']) && $_GET['embed'] === '1';
 
 $error = '';
 $table = '';
@@ -470,6 +471,22 @@ $avgClicks = $sessionCount > 0 ? number_format($clickTotal / $sessionCount, 2, '
         --muted: var(--muted-dark);
         --line: var(--line-dark);
       }
+    }
+    :root[data-theme="dark"] {
+      color-scheme: dark;
+      --bg: var(--bg-dark);
+      --panel: var(--panel-dark);
+      --ink: var(--ink-dark);
+      --muted: var(--muted-dark);
+      --line: var(--line-dark);
+    }
+    :root[data-theme="light"] {
+      color-scheme: light;
+      --bg: var(--bg-light);
+      --panel: var(--panel-light);
+      --ink: var(--ink-light);
+      --muted: var(--muted-light);
+      --line: var(--line-light);
     }
     * { box-sizing: border-box; letter-spacing: 0; }
     body {
@@ -777,6 +794,7 @@ $avgClicks = $sessionCount > 0 ? number_format($clickTotal / $sessionCount, 2, '
   </style>
 </head>
 <body>
+  <?php if (!$isEmbed): ?>
   <header role="banner">
     <div class="header-inner">
       <div>
@@ -805,6 +823,7 @@ $avgClicks = $sessionCount > 0 ? number_format($clickTotal / $sessionCount, 2, '
       </form>
     </div>
   </header>
+  <?php endif; ?>
 
   <main role="main">
     <?php if ($error !== ''): ?>

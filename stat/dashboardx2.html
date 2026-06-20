@@ -7,16 +7,19 @@
 <title>DashboardX2 · MySQL</title>
 <script>
   (() => {
+    const params = new URLSearchParams(location.search);
     try {
       const saved = localStorage.getItem("dashboardx2_theme");
       const prefersDark = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
       document.documentElement.setAttribute("data-theme", saved || (prefersDark ? "dark" : "light"));
-      const params = new URLSearchParams(location.search);
-      if (params.get("hide_recent") === "1") {
-        document.documentElement.setAttribute("data-hide-recent", "true");
-      }
     } catch (error) {
       document.documentElement.setAttribute("data-theme", "light");
+    }
+    if (params.get("hide_recent") === "1") {
+      document.documentElement.setAttribute("data-hide-recent", "true");
+    }
+    if (params.get("embed") === "1") {
+      document.documentElement.setAttribute("data-embed", "true");
     }
   })();
 </script>
@@ -51,6 +54,10 @@
   }
 
   :root[data-hide-recent="true"] .big {
+    display: none;
+  }
+
+  :root[data-embed="true"] header {
     display: none;
   }
 
@@ -1020,6 +1027,10 @@
   el.reload.addEventListener("click", () => pullOnce());
   el.ar.addEventListener("change", syncAuto);
   el.theme.addEventListener("click", () => applyTheme(getTheme() === "dark" ? "light" : "dark"));
+  window.addEventListener("message", (event) => {
+    if (event.origin !== location.origin || !event.data || event.data.type !== "stats3-theme") return;
+    applyTheme(event.data.theme === "dark" ? "dark" : "light");
+  });
 
   setInterval(renderNow, 1000);
   loadState();
