@@ -18,9 +18,6 @@ function stats_scalar(PDO $pdo, string $sql, array $params = [])
 }
 
 $days = max(1, min(365, (int)($_GET['days'] ?? 30)));
-$excludeGermans = isset($_GET['exclude_germans']) && $_GET['exclude_germans'] === '1';
-$countryCondition = $excludeGermans ? pixl_sql_exclude_german_country_condition() : '';
-$countryClause = $countryCondition !== '' ? " AND $countryCondition" : '';
 $error = '';
 $table = '';
 $metrics = [
@@ -46,23 +43,23 @@ try {
     $metrics = [
         'users' => (int)stats_scalar(
             $pdo,
-            "SELECT COUNT(*) FROM `$table` WHERE `created_at` >= :users_since$countryClause",
+            "SELECT COUNT(*) FROM `$table` WHERE `created_at` >= :users_since",
             [':users_since' => $since]
         ),
         'hash' => (int)stats_scalar(
             $pdo,
             "SELECT COUNT(DISTINCT `visitor_hash`) FROM `$table`
-             WHERE `created_at` >= :hash_since AND `visitor_hash` <> ''$countryClause",
+             WHERE `created_at` >= :hash_since AND `visitor_hash` <> ''",
             [':hash_since' => $since]
         ),
         'ok' => (int)stats_scalar(
             $pdo,
-            "SELECT COUNT(*) FROM `$table` WHERE `created_at` >= :ok_since AND `is_bot` = 0$countryClause",
+            "SELECT COUNT(*) FROM `$table` WHERE `created_at` >= :ok_since AND `is_bot` = 0",
             [':ok_since' => $since]
         ),
         'url' => (int)stats_scalar(
             $pdo,
-            "SELECT COUNT(DISTINCT $pageExpr) FROM `$table` WHERE `created_at` >= :url_since$countryClause",
+            "SELECT COUNT(DISTINCT $pageExpr) FROM `$table` WHERE `created_at` >= :url_since",
             [':url_since' => $since]
         ),
         'min' => round((float)stats_scalar(
@@ -71,7 +68,7 @@ try {
              FROM (
                SELECT COUNT(*) AS `events_per_minute`
                FROM `$table`
-               WHERE `created_at` >= :minute_since$countryClause
+               WHERE `created_at` >= :minute_since
                GROUP BY DATE_FORMAT(`created_at`, '%Y-%m-%d %H:%i')
              ) AS `minute_counts`",
             [':minute_since' => $since]
@@ -89,7 +86,7 @@ try {
              FROM (
                SELECT `visitor_hash`, MIN(`created_at`) AS `first_seen`
                FROM `$table`
-               WHERE `created_at` >= :visitor_interval_since AND `visitor_hash` <> ''$countryClause
+               WHERE `created_at` >= :visitor_interval_since AND `visitor_hash` <> ''
                GROUP BY `visitor_hash`
              ) AS `unique_visitors`",
             [':visitor_interval_since' => $lastThreeHours]
@@ -103,12 +100,10 @@ $pixlQuery = http_build_query([
     'days' => $days,
     'embed' => 1,
     'hide_activity' => 1,
-    'exclude_germans' => $excludeGermans ? 1 : 0,
 ]);
 $checkQuery = http_build_query([
     'days' => $days,
     'embed' => 1,
-    'exclude_germans' => $excludeGermans ? 1 : 0,
 ]);
 $dashboardQuery = http_build_query([
     'days' => $days,
@@ -116,7 +111,6 @@ $dashboardQuery = http_build_query([
     'ar' => 1,
     'embed' => 1,
     'hide_recent' => 1,
-    'exclude_germans' => $excludeGermans ? 1 : 0,
 ]);
 ?>
 <!doctype html>
@@ -181,16 +175,18 @@ $dashboardQuery = http_build_query([
 
     .topbar { position: sticky; z-index: 10; top: 0; border-bottom: 1px solid var(--line); background: var(--surface); }
     .topbar-inner, main { width: min(1440px, 100%); margin-inline: auto; padding-inline: 20px; }
-    .topbar-inner { min-height: 68px; display: flex; align-items: center; gap: 20px; overflow-x: auto; padding-block: 10px; -webkit-overflow-scrolling: touch; }
-    .topbar-title { min-width: max-content; display: flex; flex: 1 0 auto; align-items: baseline; gap: 12px; white-space: nowrap; }
+    .topbar-inner { min-height: 92px; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 20px; align-items: center; padding-block: 14px; }
     h1, h2, p { margin: 0; }
     h1 { font-size: 28px; line-height: 1.15; }
-    .main-since { color: var(--muted); font-size: 12px; }
-    .controls { display: flex; flex: 0 0 auto; align-items: center; justify-content: flex-end; gap: 8px; flex-wrap: nowrap; }
-    .controls button { min-height: 36px; display: inline-flex; align-items: center; justify-content: center; border: 1px solid var(--line); border-radius: 6px; padding: 7px 10px; color: var(--ink); background: var(--surface-alt); font-weight: 750; white-space: nowrap; cursor: pointer; }
+    .main-since { margin-top: 4px; color: var(--muted); font-size: 12px; }
+    .controls { display: flex; align-items: center; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
+    .controls label { color: var(--ink); font-size: 12px; font-weight: 750; }
+    .controls button { min-height: 36px; display: inline-flex; align-items: center; justify-content: center; border: 1px solid var(--line); border-radius: 6px; padding: 7px 10px; color: var(--ink); background: var(--surface-alt); font-weight: 750; cursor: pointer; }
     .controls button { color: #ffffff; border-color: var(--accent); background: var(--accent); }
     .controls .secondary, .controls .theme-toggle { color: var(--ink); border-color: var(--line); background: var(--surface-alt); }
-    .controls .germans-toggle[aria-pressed="true"] { color: var(--danger); border-color: var(--danger); background: var(--danger-soft); }
+    .main-notify-status { max-width: 320px; color: var(--muted); font-size: 12px; }
+    .main-mute { min-height: 36px; display: inline-flex; align-items: center; gap: 5px; border: 1px solid var(--line); border-radius: 6px; padding: 7px 10px; background: var(--surface-alt); }
+    .main-mute input { width: 16px; height: 16px; margin: 0; accent-color: var(--accent); }
 
     main { padding-block: 22px 44px; }
     .notice { margin-bottom: 18px; border: 1px solid var(--danger); border-radius: 6px; padding: 12px 14px; color: var(--danger); background: var(--danger-soft); }
@@ -209,12 +205,19 @@ $dashboardQuery = http_build_query([
     .metric p { margin-top: 3px; color: var(--muted); font-size: 12px; }
 
     @media (max-width: 980px) {
+      .topbar { position: static; }
+      .topbar-inner { grid-template-columns: 1fr; }
+      .controls { justify-content: flex-start; }
+      .source-section { scroll-margin-top: 16px; }
       .metric-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
     }
 
     @media (max-width: 600px) {
       .topbar-inner, main { padding-inline: 12px; }
       h1 { font-size: 24px; }
+      .controls { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); width: 100%; }
+      .controls button, .controls .main-mute { width: 100%; }
+      .main-notify-status { grid-column: 1 / -1; max-width: none; }
       .section-heading { align-items: flex-start; flex-direction: column; gap: 3px; }
       .metric-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       iframe { min-height: 640px; }
@@ -224,12 +227,18 @@ $dashboardQuery = http_build_query([
 <body>
   <header class="topbar">
     <div class="topbar-inner">
-      <div class="topbar-title">
+      <div>
         <h1>Pixl SQL Statistik</h1>
         <p class="main-since">Seit <?= stats_h($since) ?> UTC</p>
       </div>
       <div class="controls">
-        <button class="secondary germans-toggle" id="statsGermansToggle" type="button" aria-pressed="<?= $excludeGermans ? 'true' : 'false' ?>" title="<?= $excludeGermans ? 'Deutsche Besucher sind ausgeblendet' : 'Deutsche Besucher ausblenden' ?>">Germans</button>
+        <button id="statsNotificationButton" type="button">Browser-Notifikation aktivieren</button>
+        <button class="secondary" id="statsNotificationOffButton" type="button">Browser-Notifikation ausschalten</button>
+        <span class="main-notify-status" id="statsNotificationStatus">Aus</span>
+        <label class="main-mute" for="statsNotificationMute">
+          <input id="statsNotificationMute" type="checkbox">
+          Ton aus
+        </label>
         <button class="theme-toggle" id="statsThemeToggle" type="button" aria-pressed="false">Dark Mode</button>
       </div>
     </div>
@@ -291,17 +300,43 @@ $dashboardQuery = http_build_query([
       "use strict";
 
       const frames = Array.from(document.querySelectorAll(".source-frame"));
+      const pixlFrame = document.getElementById("pixlStatsFrame");
       const themeToggle = document.getElementById("statsThemeToggle");
-      const germansToggle = document.getElementById("statsGermansToggle");
+      const notificationButton = document.getElementById("statsNotificationButton");
+      const notificationOffButton = document.getElementById("statsNotificationOffButton");
+      const notificationStatus = document.getElementById("statsNotificationStatus");
+      const notificationMute = document.getElementById("statsNotificationMute");
 
-      germansToggle.addEventListener("click", () => {
-        const url = new URL(window.location.href);
-        if (germansToggle.getAttribute("aria-pressed") === "true") {
-          url.searchParams.delete("exclude_germans");
-        } else {
-          url.searchParams.set("exclude_germans", "1");
+      function pixlControl(id) {
+        try {
+          return pixlFrame.contentDocument && pixlFrame.contentDocument.getElementById(id);
+        } catch (error) {
+          return null;
         }
-        window.location.assign(url.toString());
+      }
+
+      function syncNotificationControls() {
+        const childStatus = pixlControl("pixlNotificationStatus");
+        const childOff = pixlControl("pixlNotificationOffButton");
+        const childMute = pixlControl("pixlNotificationMute");
+        if (childStatus) notificationStatus.textContent = childStatus.textContent || "Aus";
+        if (childOff) notificationOffButton.disabled = childOff.disabled;
+        if (childMute) notificationMute.checked = childMute.checked;
+      }
+
+      notificationButton.addEventListener("click", () => {
+        const childButton = pixlControl("pixlNotificationButton");
+        if (childButton) childButton.click();
+      });
+      notificationOffButton.addEventListener("click", () => {
+        const childButton = pixlControl("pixlNotificationOffButton");
+        if (childButton) childButton.click();
+      });
+      notificationMute.addEventListener("change", () => {
+        const childMute = pixlControl("pixlNotificationMute");
+        if (!childMute || !pixlFrame.contentWindow) return;
+        childMute.checked = notificationMute.checked;
+        childMute.dispatchEvent(new pixlFrame.contentWindow.Event("change", { bubbles: true }));
       });
 
       function currentTheme() {
@@ -354,6 +389,7 @@ $dashboardQuery = http_build_query([
         frame.addEventListener("load", () => {
           observeFrame(frame);
           syncFrameTheme(frame, currentTheme());
+          if (frame === pixlFrame) syncNotificationControls();
         });
       });
       themeToggle.addEventListener("click", () => {
@@ -362,6 +398,7 @@ $dashboardQuery = http_build_query([
       applyTheme(currentTheme(), false);
       window.setInterval(() => {
         frames.forEach(resizeFrame);
+        syncNotificationControls();
       }, 1000);
     })();
   </script>

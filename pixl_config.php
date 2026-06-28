@@ -24,7 +24,7 @@ return array (
   ),
   'public_key' => '',
   'hash_salt' => 'flfgldhlbfghyeokw8790521',
-  'stats_password' => 'myadmno',
+  'stats_password' => 'myadmnoX',
   'stats_cookie_name' => 'pixl_stats_login',
   'stats_auto_login_days' => 30,
 );

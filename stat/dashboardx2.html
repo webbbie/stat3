@@ -787,9 +787,13 @@
 
   function apiUrl() {
     const url = new URL(API_PATH, location.href);
+    const pageParams = new URLSearchParams(location.search);
     url.searchParams.set("dashboardx2_json", "1");
     url.searchParams.set("days", String(clampInt(el.days.value, 30, 1, 365)));
     url.searchParams.set("limit", String(clampInt(el.limit.value, 25, 1, 500)));
+    if (pageParams.get("exclude_germans") === "1") {
+      url.searchParams.set("exclude_germans", "1");
+    }
     return url;
   }
 
@@ -900,6 +904,18 @@
     };
   }
 
+  function cappedBarData(values) {
+    const realValues = values.map((value) => Math.max(0, Number(value) || 0));
+    const sorted = [...realValues].sort((a, b) => b - a);
+    const largest = sorted[0] || 0;
+    const second = sorted[1] || 0;
+    const cap = second > 0 ? second * 1.1 : largest;
+    return {
+      realValues,
+      visualValues: realValues.map((value) => value === largest && largest > cap ? cap : value)
+    };
+  }
+
   function createCharts() {
     if (!window.Chart) return;
     Chart.defaults.color = getTheme() === "dark" ? "#a9b7c9" : "#626f81";
@@ -919,8 +935,24 @@
 
     const mkHBar = (id, color) => new Chart(document.getElementById(id), {
       type: "bar",
-      data: { labels: [], datasets: [{ data: [], backgroundColor: color, borderRadius: 4 }] },
-      options: { indexAxis: "y", responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { x: { beginAtZero: true }, y: { grid: { display: false } } } }
+      data: { labels: [], datasets: [{ data: [], realValues: [], backgroundColor: color, borderRadius: 4 }] },
+      options: {
+        indexAxis: "y",
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            callbacks: {
+              label(context) {
+                const real = context.dataset.realValues[context.dataIndex] ?? 0;
+                return `Count: ${numberFmt.format(real)}`;
+              }
+            }
+          }
+        },
+        scales: { x: { beginAtZero: true }, y: { grid: { display: false } } }
+      }
     });
 
     charts.browser = mkHBar("c_browser", colors.cyan);
@@ -933,7 +965,13 @@
     if (!chart) return;
     const next = chartData(data);
     chart.data.labels = next.labels;
-    chart.data.datasets[0].data = next.values;
+    if (chart.config.type === "bar") {
+      const capped = cappedBarData(next.values);
+      chart.data.datasets[0].data = capped.visualValues;
+      chart.data.datasets[0].realValues = capped.realValues;
+    } else {
+      chart.data.datasets[0].data = next.values;
+    }
     chart.update("none");
   }
 

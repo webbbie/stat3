@@ -15,6 +15,8 @@ const CHECK_MAX_LEVEL_DEFAULT = 6;
 const CHECK_TABLE_LIMIT = 80;
 const CHECK_PATH_LIMIT = 14;
 const CHECK_CAMPAIGN_LIMIT = 60;
+const CHECK_CAMPAIGN_MIN_SESSIONS = 100;
+const CHECK_TOP_LIST_LIMIT = 10;
 
 function check_h($value): string
 {
@@ -206,6 +208,7 @@ $rowLimit = check_int($_GET['limit'] ?? null, CHECK_ROW_LIMIT_DEFAULT, 1000, CHE
 $maxLevel = check_int($_GET['levels'] ?? null, CHECK_MAX_LEVEL_DEFAULT, 2, 12);
 $audience = check_audience($_GET['audience'] ?? null);
 $isEmbed = isset($_GET['embed']) && $_GET['embed'] === '1';
+$excludeGermans = isset($_GET['exclude_germans']) && $_GET['exclude_germans'] === '1';
 
 $error = '';
 $table = '';
@@ -213,6 +216,7 @@ $events = [];
 $sessions = [];
 $levelSummary = [];
 $levelPages = [];
+$topLevelPages = [];
 $pathCounts = [];
 $campaigns = [];
 $topTransitions = [];
@@ -231,6 +235,9 @@ try {
         $where .= ' AND `is_bot` = 0';
     } elseif ($audience === 'bots') {
         $where .= ' AND `is_bot` = 1';
+    }
+    if ($excludeGermans) {
+        $where .= ' AND ' . pixl_sql_exclude_german_country_condition();
     }
 
     $events = check_rows(
@@ -411,6 +418,13 @@ try {
     }
     unset($pages);
 
+    foreach ($levelPages as $level => $pages) {
+        foreach ($pages as $page => $row) {
+            $topLevelPages[$level . '|' . $page] = $row;
+        }
+    }
+    check_sort_assoc_count($topLevelPages);
+
     check_sort_assoc_count($pathCounts);
     check_sort_assoc_count($campaigns);
     check_sort_assoc_count($topTransitions);
@@ -418,6 +432,12 @@ try {
     $error = $e->getMessage();
 }
 
+$campaignOverview = array_filter(
+    $campaigns,
+    static function (array $campaign): bool {
+        return (int)($campaign['sessions'] ?? 0) >= CHECK_CAMPAIGN_MIN_SESSIONS;
+    }
+);
 $sessionCount = count($sessions);
 $eventCount = count($events);
 $bounceCount = 0;
@@ -806,6 +826,7 @@ $avgClicks = $sessionCount > 0 ? number_format($clickTotal / $sessionCount, 2, '
       </div>
       <form method="get" aria-label="Analyse Filter">
         <?php if (isset($_GET['embed']) && $_GET['embed'] === '1'): ?><input type="hidden" name="embed" value="1"><?php endif; ?>
+        <?php if ($excludeGermans): ?><input type="hidden" name="exclude_germans" value="1"><?php endif; ?>
         <label for="days">Tage</label>
         <input id="days" name="days" type="number" min="<?= CHECK_DAYS_MIN ?>" max="<?= CHECK_DAYS_MAX ?>" value="<?= check_h($days) ?>">
         <label for="gap">Gap</label>
@@ -836,7 +857,7 @@ $avgClicks = $sessionCount > 0 ? number_format($clickTotal / $sessionCount, 2, '
         <?= check_metric('Bounce sessions', check_number($bounceCount), check_percent($bounceCount, $sessionCount)) ?>
         <?= check_metric('Total clicks', check_number($clickTotal), 'after landing') ?>
         <?= check_metric('Avg clicks', $avgClicks, 'per session') ?>
-        <?= check_metric('Campaign rows', check_number(count($campaigns)), 'UTM groups') ?>
+        <?= check_metric('Campaign rows', check_number(count($campaignOverview)), 'min. ' . check_number(CHECK_CAMPAIGN_MIN_SESSIONS) . ' sessions') ?>
         <?= check_metric('Max level', (string)$maxLevel, 'Landing is level 0') ?>
       </div>
 
@@ -903,7 +924,7 @@ $avgClicks = $sessionCount > 0 ? number_format($clickTotal / $sessionCount, 2, '
 
       <div class="grid">
         <section aria-label="Detailed Level Pages">
-          <h2>Level Pages</h2>
+          <h2><span>Level Pages</span><span class="muted">Top <?= check_h((string)CHECK_TOP_LIST_LIMIT) ?></span></h2>
           <div class="scroll">
             <table>
               <thead>
@@ -917,28 +938,24 @@ $avgClicks = $sessionCount > 0 ? number_format($clickTotal / $sessionCount, 2, '
                 </tr>
               </thead>
               <tbody>
-                <?php $levelPageRows = 0; ?>
-                <?php foreach ($levelPages as $level => $pages): ?>
-                  <?php foreach (array_slice($pages, 0, 10, true) as $row): ?>
-                    <?php $levelPageRows++; ?>
-                    <tr>
-                      <td><span class="badge"><?= check_h($row['level']) ?></span></td>
-                      <td><?= check_h($row['name']) ?></td>
-                      <td title="<?= check_h($row['page']) ?>"><?= check_h(check_short($row['page'], 78)) ?></td>
-                      <td><?= check_h(check_number($row['sessions'])) ?></td>
-                      <td><?= check_h(check_number($row['exits'])) ?></td>
-                      <td><?= check_h(check_percent($row['exits'], $row['sessions'])) ?></td>
-                    </tr>
-                  <?php endforeach; ?>
+                <?php foreach (array_slice($topLevelPages, 0, CHECK_TOP_LIST_LIMIT, true) as $row): ?>
+                  <tr>
+                    <td><span class="badge"><?= check_h($row['level']) ?></span></td>
+                    <td><?= check_h($row['name']) ?></td>
+                    <td title="<?= check_h($row['page']) ?>"><?= check_h(check_short($row['page'], 78)) ?></td>
+                    <td><?= check_h(check_number($row['sessions'])) ?></td>
+                    <td><?= check_h(check_number($row['exits'])) ?></td>
+                    <td><?= check_h(check_percent($row['exits'], $row['sessions'])) ?></td>
+                  </tr>
                 <?php endforeach; ?>
-                <?= $levelPageRows === 0 ? check_table_empty(6, 'No level page rows found.') : '' ?>
+                <?= $topLevelPages === [] ? check_table_empty(6, 'No level page rows found.') : '' ?>
               </tbody>
             </table>
           </div>
         </section>
 
         <section aria-label="Top Transitions">
-          <h2>Top Transitions</h2>
+          <h2><span>Top Transitions</span><span class="muted">Top <?= check_h((string)CHECK_TOP_LIST_LIMIT) ?></span></h2>
           <div class="scroll">
             <table>
               <thead>
@@ -949,7 +966,7 @@ $avgClicks = $sessionCount > 0 ? number_format($clickTotal / $sessionCount, 2, '
                 </tr>
               </thead>
               <tbody>
-                <?php foreach (array_slice($topTransitions, 0, 28, true) as $row): ?>
+                <?php foreach (array_slice($topTransitions, 0, CHECK_TOP_LIST_LIMIT, true) as $row): ?>
                   <tr>
                     <td><span class="muted"><?= check_h(check_level_name((int)$row['level'])) ?></span><br><?= check_h(check_short($row['from'], 54)) ?></td>
                     <td><span class="muted"><?= check_h(check_level_name((int)$row['level'] + 1)) ?></span><br><?= check_h(check_short($row['to'], 54)) ?></td>
@@ -964,7 +981,7 @@ $avgClicks = $sessionCount > 0 ? number_format($clickTotal / $sessionCount, 2, '
       </div>
 
       <section aria-label="Campaign Overview">
-        <h2><span>Campaign Overview</span><span class="muted">utm_source, utm_medium, utm_campaign, content, term</span></h2>
+        <h2><span>Campaign Overview</span><span class="muted">Minimum <?= check_h(check_number(CHECK_CAMPAIGN_MIN_SESSIONS)) ?> Sessions</span></h2>
         <div class="scroll">
           <table class="wide-table">
             <thead>
@@ -985,7 +1002,7 @@ $avgClicks = $sessionCount > 0 ? number_format($clickTotal / $sessionCount, 2, '
               </tr>
             </thead>
             <tbody>
-              <?php foreach (array_slice($campaigns, 0, CHECK_CAMPAIGN_LIMIT, true) as $row): ?>
+              <?php foreach (array_slice($campaignOverview, 0, CHECK_CAMPAIGN_LIMIT, true) as $row): ?>
                 <?php
                   arsort($row['landing_pages']);
                   $topLanding = (string)(array_key_first($row['landing_pages']) ?? '-');
@@ -1006,7 +1023,7 @@ $avgClicks = $sessionCount > 0 ? number_format($clickTotal / $sessionCount, 2, '
                   <td title="<?= check_h($topLanding) ?>"><?= check_h(check_short($topLanding, 72)) ?></td>
                 </tr>
               <?php endforeach; ?>
-              <?= $campaigns === [] ? check_table_empty(13, 'No campaign rows found.') : '' ?>
+              <?= $campaignOverview === [] ? check_table_empty(13, 'No campaigns with at least ' . CHECK_CAMPAIGN_MIN_SESSIONS . ' sessions found.') : '' ?>
             </tbody>
           </table>
         </div>

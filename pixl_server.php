@@ -114,6 +114,33 @@ function pixl_sql_referrer_expression(string $alias = ''): string
     return "COALESCE(NULLIF(SUBSTRING_INDEX(SUBSTRING_INDEX({$prefix}`referrer`, '?', 1), '#', 1), ''), 'direct')";
 }
 
+function pixl_sql_exclude_german_country_condition(string $alias = ''): string
+{
+    if ($alias !== '' && !preg_match('/^[A-Za-z0-9_]+$/', $alias)) {
+        throw new RuntimeException('Ungueltiger SQL-Alias.');
+    }
+
+    $prefix = $alias !== '' ? '`' . $alias . '`.' : '';
+    return "COALESCE(UPPER(TRIM({$prefix}`country`)), '') NOT IN ('DE', 'DEU', 'GER', 'GERMANY', 'DEUTSCHLAND')";
+}
+
+function pixl_visual_bar_cap(array $values, float $maxRatio = 1.1): float
+{
+    $normalized = [];
+    foreach ($values as $value) {
+        $normalized[] = max(0.0, (float)$value);
+    }
+    rsort($normalized, SORT_NUMERIC);
+
+    $largest = $normalized[0] ?? 0.0;
+    $second = $normalized[1] ?? 0.0;
+    if ($second > 0.0) {
+        $largest = min($largest, $second * max(1.0, $maxRatio));
+    }
+
+    return max(1.0, $largest);
+}
+
 function pixl_url_without_parameters($value): string
 {
     $value = trim((string)$value);
@@ -693,7 +720,7 @@ function pixl_stats_safe_return_url($value): string
     $queryValues = [];
     parse_str((string)($parts['query'] ?? ''), $queryValues);
     $query = [];
-    foreach (['days', 'limit', 'ar', 'bot'] as $key) {
+    foreach (['days', 'limit', 'ar', 'bot', 'exclude_germans'] as $key) {
         if (isset($queryValues[$key]) && is_scalar($queryValues[$key])) {
             $query[$key] = substr((string)$queryValues[$key], 0, 40);
         }
