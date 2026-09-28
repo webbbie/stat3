@@ -41,6 +41,37 @@ return [
         '/landing-page/',
     ],
 
+    // Local DB-IP Country Lite lookup. Keep trust_proxy_headers disabled when
+    // Apache/PHP is reached directly; otherwise forwarded headers are spoofable.
+    'geoip' => [
+        'enabled' => true,
+        'database_path' => 'data/geoip/dbip-country-lite.mmdb',
+        'pushover_country' => true,
+        'trust_proxy_headers' => false,
+    ],
+
+    // Pushover runs only in PHP. Never put these secrets into pixl6.js.
+    'pushover' => [
+        'enabled' => false,
+        'token' => 'YOUR_PUSHOVER_APPLICATION_TOKEN',
+        'user' => 'YOUR_PUSHOVER_USER_OR_GROUP_KEY',
+        'sound' => 'gamelan',
+        'priority' => 0,
+        'timeout' => 8,
+        'throttle_seconds' => 90,
+        'max_messages_per_hour' => 10,
+        'reading_score_only' => false,
+    ],
+
+    'captcha' => [
+        'enabled' => false,
+        'visitor_interval' => 100,
+        'page_view_interval' => 0, // Unique pages per visitor, summed between phases; 0 disables this additional threshold.
+        'landing_urls' => [], // One full HTTP(S) URL or /path per entry; empty allows every tracked page.
+        'success_target' => 10,
+        'max_duration_hours' => 4, // Maximum active phase duration; expiry restarts both waiting counters.
+    ],
+
     // Optional: set the same value in pixl77.js CONFIG.SQL_PUBLIC_KEY.
     'public_key' => '',
 

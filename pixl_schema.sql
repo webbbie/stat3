@@ -50,3 +50,339 @@ CREATE TABLE IF NOT EXISTS `pixl_events` (
   KEY `bot_created` (`is_bot`, `bot_category`, `created_at`),
   KEY `visitor_created` (`visitor_hash`, `created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Unified Stats3 storage schema. All tables below intentionally live in the
+-- same MySQL/MariaDB database configured by pixl_config.php.
+
+CREATE TABLE IF NOT EXISTS `pixl_captcha_state` (
+  `id` TINYINT UNSIGNED NOT NULL PRIMARY KEY,
+  `revision` CHAR(64) NOT NULL DEFAULT '',
+  `waiting_visitors` INT UNSIGNED NOT NULL DEFAULT 0,
+  `waiting_page_views` BIGINT UNSIGNED NOT NULL DEFAULT 0,
+  `phase_id` CHAR(32) NOT NULL DEFAULT '',
+  `phase_started_at` BIGINT UNSIGNED NOT NULL DEFAULT 0,
+  `successes` INT UNSIGNED NOT NULL DEFAULT 0,
+  `last_cleanup` BIGINT UNSIGNED NOT NULL DEFAULT 0
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `pixl_captcha_page_views` (
+  `visitor_hash` CHAR(64) NOT NULL,
+  `page_hash` CHAR(64) NOT NULL,
+  PRIMARY KEY (`visitor_hash`, `page_hash`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `pixl_captcha_visitors` (
+  `visitor_hash` CHAR(64) NOT NULL PRIMARY KEY,
+  `revision` CHAR(64) NOT NULL DEFAULT '',
+  `last_seen` BIGINT UNSIGNED NOT NULL,
+  `phase_id` CHAR(32) NOT NULL DEFAULT '',
+  `token` CHAR(64) NOT NULL DEFAULT '',
+  `expires_at` BIGINT UNSIGNED NOT NULL DEFAULT 0,
+  `verified_phase` CHAR(32) NOT NULL DEFAULT '',
+  `failed_attempts` INT UNSIGNED NOT NULL DEFAULT 0,
+  `failed_attempt_sources` TEXT NULL,
+  KEY `last_seen` (`last_seen`),
+  KEY `phase_expiry` (`phase_id`, `expires_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `pixl_captcha_stats` (
+  `id` TINYINT UNSIGNED NOT NULL PRIMARY KEY,
+  `revision` CHAR(64) NOT NULL DEFAULT '',
+  `failures` BIGINT UNSIGNED NOT NULL DEFAULT 0,
+  `blocked_visitors` BIGINT UNSIGNED NULL,
+  `last_successes` INT UNSIGNED NULL,
+  `last_failures` BIGINT UNSIGNED NULL,
+  `last_blocked_visitors` BIGINT UNSIGNED NULL,
+  `last_completed_at` BIGINT UNSIGNED NOT NULL DEFAULT 0,
+  `tracking_started_at` BIGINT UNSIGNED NOT NULL DEFAULT 0,
+  `sample_started_at` BIGINT UNSIGNED NOT NULL DEFAULT 0,
+  `sample_visitors` BIGINT UNSIGNED NOT NULL DEFAULT 0
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `pixl_events_push_subscriptions` (
+  `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `last_seen_at` DATETIME NULL,
+  `last_sent_at` DATETIME NULL,
+  `last_error_at` DATETIME NULL,
+  `endpoint_hash` CHAR(64) NOT NULL,
+  `endpoint` TEXT NOT NULL,
+  `p256dh` VARCHAR(255) NOT NULL DEFAULT '',
+  `auth` VARCHAR(255) NOT NULL DEFAULT '',
+  `content_encoding` VARCHAR(40) NOT NULL DEFAULT 'aes128gcm',
+  `label` VARCHAR(120) NOT NULL DEFAULT '',
+  `user_agent` TEXT NULL,
+  `active` TINYINT(1) NOT NULL DEFAULT 1,
+  `send_count` INT UNSIGNED NOT NULL DEFAULT 0,
+  `fail_count` INT UNSIGNED NOT NULL DEFAULT 0,
+  `last_status` SMALLINT UNSIGNED NULL,
+  `last_error` TEXT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `endpoint_hash` (`endpoint_hash`),
+  KEY `active_updated` (`active`, `updated_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `pixl_events_push_meta` (
+  `name` VARCHAR(80) NOT NULL,
+  `value` LONGTEXT NOT NULL,
+  `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`name`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `stat4_visitors` (
+  `visitor_hash` CHAR(64) NOT NULL,
+  `first_seen` DATETIME NOT NULL,
+  `last_seen` DATETIME NOT NULL,
+  `first_ip_hash` CHAR(64) NOT NULL,
+  `first_ip_prefix` VARCHAR(64) NOT NULL DEFAULT '',
+  `last_ip_prefix` VARCHAR(64) NOT NULL DEFAULT '',
+  `is_bot` TINYINT(1) NOT NULL DEFAULT 0,
+  PRIMARY KEY (`visitor_hash`),
+  KEY `idx_visitors_seen` (`last_seen`),
+  KEY `idx_visitors_first` (`first_seen`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `stat4_sessions` (
+  `session_id` CHAR(36) NOT NULL,
+  `visitor_hash` CHAR(64) NOT NULL,
+  `started_at` DATETIME NOT NULL,
+  `last_seen` DATETIME NOT NULL,
+  `pageviews` INT UNSIGNED NOT NULL DEFAULT 0,
+  `clicks` INT UNSIGNED NOT NULL DEFAULT 0,
+  `active_seconds` INT UNSIGNED NOT NULL DEFAULT 0,
+  `max_level` TINYINT UNSIGNED NOT NULL DEFAULT 0,
+  `is_bounce` TINYINT(1) NOT NULL DEFAULT 1,
+  `is_bot` TINYINT(1) NOT NULL DEFAULT 0,
+  `referrer` VARCHAR(2048) NOT NULL DEFAULT '',
+  `utm_source` VARCHAR(191) NOT NULL DEFAULT '',
+  `utm_medium` VARCHAR(191) NOT NULL DEFAULT '',
+  `utm_campaign` VARCHAR(191) NOT NULL DEFAULT '',
+  `utm_term` VARCHAR(191) NOT NULL DEFAULT '',
+  `utm_content` VARCHAR(191) NOT NULL DEFAULT '',
+  PRIMARY KEY (`session_id`),
+  KEY `idx_sessions_started` (`started_at`),
+  KEY `idx_sessions_visitor` (`visitor_hash`),
+  CONSTRAINT `fk_stat4_session_visitor` FOREIGN KEY (`visitor_hash`) REFERENCES `stat4_visitors` (`visitor_hash`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `stat4_events` (
+  `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `event_uuid` CHAR(36) NOT NULL,
+  `session_id` CHAR(36) NOT NULL,
+  `visitor_hash` CHAR(64) NOT NULL,
+  `occurred_at` DATETIME NOT NULL,
+  `event_type` ENUM('pageview','click','heartbeat','leave') NOT NULL,
+  `hostname` VARCHAR(255) NOT NULL DEFAULT '',
+  `path` VARCHAR(2048) NOT NULL DEFAULT '/',
+  `page_url` TEXT NULL,
+  `title` VARCHAR(512) NOT NULL DEFAULT '',
+  `referrer` VARCHAR(2048) NOT NULL DEFAULT '',
+  `target` VARCHAR(2048) NOT NULL DEFAULT '',
+  `screen_size` VARCHAR(32) NOT NULL DEFAULT '',
+  `inner_size` VARCHAR(32) NOT NULL DEFAULT '',
+  `language` VARCHAR(32) NOT NULL DEFAULT '',
+  `country` VARCHAR(8) NOT NULL DEFAULT '',
+  `browser` VARCHAR(64) NOT NULL DEFAULT '',
+  `browser_version` VARCHAR(32) NOT NULL DEFAULT '',
+  `os` VARCHAR(64) NOT NULL DEFAULT '',
+  `os_version` VARCHAR(32) NOT NULL DEFAULT '',
+  `device` VARCHAR(32) NOT NULL DEFAULT '',
+  `user_agent` VARCHAR(1024) NOT NULL DEFAULT '',
+  `level` TINYINT UNSIGNED NOT NULL DEFAULT 0,
+  `active_seconds` SMALLINT UNSIGNED NOT NULL DEFAULT 0,
+  `ok` TINYINT(1) NOT NULL DEFAULT 1,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_stat4_event_uuid` (`event_uuid`),
+  KEY `idx_events_time` (`occurred_at`),
+  KEY `idx_events_session` (`session_id`),
+  KEY `idx_events_visitor` (`visitor_hash`),
+  KEY `idx_events_type_time` (`event_type`, `occurred_at`),
+  CONSTRAINT `fk_stat4_event_session` FOREIGN KEY (`session_id`) REFERENCES `stat4_sessions` (`session_id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `stat4_notifications` (
+  `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `visitor_hash` CHAR(64) NOT NULL,
+  `pageview_milestone` INT UNSIGNED NOT NULL,
+  `status` ENUM('pending','sent','failed') NOT NULL DEFAULT 'pending',
+  `response_text` VARCHAR(1000) NOT NULL DEFAULT '',
+  `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `sent_at` DATETIME NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_stat4_notification_milestone` (`visitor_hash`, `pageview_milestone`),
+  KEY `idx_stat4_notification_status` (`status`, `created_at`),
+  CONSTRAINT `fk_stat4_notification_visitor` FOREIGN KEY (`visitor_hash`) REFERENCES `stat4_visitors` (`visitor_hash`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `mind_geo_cache` (
+  `ip_hash` CHAR(64) NOT NULL,
+  `status` VARCHAR(20) NOT NULL DEFAULT 'ok',
+  `country_code` VARCHAR(8) NOT NULL DEFAULT '',
+  `country_name` VARCHAR(191) NOT NULL DEFAULT '',
+  `registered_country_code` VARCHAR(8) NOT NULL DEFAULT '',
+  `registered_country_name` VARCHAR(191) NOT NULL DEFAULT '',
+  `continent_code` VARCHAR(8) NOT NULL DEFAULT '',
+  `continent_name` VARCHAR(191) NOT NULL DEFAULT '',
+  `subdivision_code` VARCHAR(32) NOT NULL DEFAULT '',
+  `subdivision_name` VARCHAR(191) NOT NULL DEFAULT '',
+  `city_name` VARCHAR(191) NOT NULL DEFAULT '',
+  `postal_code` VARCHAR(32) NOT NULL DEFAULT '',
+  `timezone` VARCHAR(80) NOT NULL DEFAULT '',
+  `latitude` DECIMAL(10,7) NULL,
+  `longitude` DECIMAL(10,7) NULL,
+  `accuracy_radius` SMALLINT UNSIGNED NULL,
+  `autonomous_system_number` BIGINT UNSIGNED NULL,
+  `autonomous_system_organization` VARCHAR(255) NOT NULL DEFAULT '',
+  `isp` VARCHAR(255) NOT NULL DEFAULT '',
+  `organization` VARCHAR(255) NOT NULL DEFAULT '',
+  `domain_name` VARCHAR(255) NOT NULL DEFAULT '',
+  `connection_type` VARCHAR(80) NOT NULL DEFAULT '',
+  `network` VARCHAR(80) NOT NULL DEFAULT '',
+  `raw_json` LONGTEXT NULL,
+  `error_text` VARCHAR(500) NOT NULL DEFAULT '',
+  `looked_up_at` DATETIME NOT NULL,
+  `expires_at` DATETIME NOT NULL,
+  PRIMARY KEY (`ip_hash`),
+  KEY `idx_mind_geo_expires` (`expires_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `mind_notifications` (
+  `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `source` VARCHAR(32) NOT NULL,
+  `source_event_id` VARCHAR(191) NOT NULL,
+  `part_index` SMALLINT UNSIGNED NOT NULL DEFAULT 1,
+  `part_count` SMALLINT UNSIGNED NOT NULL DEFAULT 1,
+  `visitor_hash` CHAR(64) NOT NULL DEFAULT '',
+  `sent_at` DATETIME NOT NULL,
+  `pushover_request` VARCHAR(80) NOT NULL DEFAULT '',
+  `title` VARCHAR(250) NOT NULL DEFAULT '',
+  `message` TEXT NOT NULL,
+  `url` VARCHAR(512) NOT NULL DEFAULT '',
+  `hostname` VARCHAR(255) NOT NULL DEFAULT '',
+  `path` VARCHAR(1024) NOT NULL DEFAULT '',
+  `browser` VARCHAR(80) NOT NULL DEFAULT '',
+  `os` VARCHAR(80) NOT NULL DEFAULT '',
+  `country` VARCHAR(20) NOT NULL DEFAULT '',
+  `language` VARCHAR(40) NOT NULL DEFAULT '',
+  `timezone` VARCHAR(80) NOT NULL DEFAULT '',
+  `ip_hash` CHAR(64) NOT NULL DEFAULT '',
+  `geo_ip_hash` CHAR(64) NULL,
+  `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_mind_notification` (`source`, `source_event_id`, `part_index`),
+  KEY `idx_mind_sent` (`sent_at`),
+  KEY `idx_mind_visitor` (`visitor_hash`, `sent_at`),
+  KEY `idx_mind_client` (`browser`, `os`, `country`, `language`),
+  CONSTRAINT `fk_mind_notification_geo` FOREIGN KEY (`geo_ip_hash`) REFERENCES `mind_geo_cache` (`ip_hash`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `impressions` (
+  `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `created_at` DATETIME NOT NULL,
+  `day` DATE NOT NULL,
+  `event_type` VARCHAR(20) NOT NULL DEFAULT 'pageview',
+  `network` VARCHAR(80) NULL,
+  `host` VARCHAR(255) NULL,
+  `page_url` VARCHAR(1024) NULL,
+  `page_path` VARCHAR(600) NULL,
+  `page_title` VARCHAR(220) NULL,
+  `referrer` VARCHAR(600) NULL,
+  `referrer_host` VARCHAR(255) NULL,
+  `language` VARCHAR(40) NULL,
+  `screen_width` INT UNSIGNED NULL,
+  `screen_height` INT UNSIGNED NULL,
+  `viewport_width` INT UNSIGNED NULL,
+  `viewport_height` INT UNSIGNED NULL,
+  `dpr` DECIMAL(8,4) NULL,
+  `visitor_hash` CHAR(32) NULL,
+  `session_hash` CHAR(32) NULL,
+  `ua_hash` CHAR(32) NULL,
+  `browser` VARCHAR(80) NULL,
+  `os` VARCHAR(80) NULL,
+  `device` VARCHAR(80) NULL,
+  `is_bot` TINYINT(1) NOT NULL DEFAULT 0,
+  `campaign` VARCHAR(180) NULL,
+  `campaign_id` VARCHAR(180) NULL,
+  `creative_id` VARCHAR(180) NULL,
+  `advertiser_id` VARCHAR(180) NULL,
+  `tracking_id` VARCHAR(220) NULL,
+  `impression_pixel` TEXT NULL,
+  `third_party_url` TEXT NULL,
+  `third_party_script_url` TEXT NULL,
+  `bidder_url` TEXT NULL,
+  `country` VARCHAR(12) NULL,
+  `ssp` VARCHAR(180) NULL,
+  `ad_width` INT UNSIGNED NULL,
+  `ad_height` INT UNSIGNED NULL,
+  `legacy_source` VARCHAR(191) NULL,
+  `legacy_id` BIGINT UNSIGNED NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_imp_legacy` (`legacy_source`, `legacy_id`),
+  KEY `idx_imp_created` (`created_at`),
+  KEY `idx_imp_day_type` (`day`, `event_type`),
+  KEY `idx_imp_campaign` (`network`, `campaign_id`, `creative_id`),
+  KEY `idx_imp_page` (`page_path`(191)),
+  KEY `idx_imp_visitor` (`visitor_hash`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `ppcmate_attributions` (
+  `client_id` VARCHAR(128) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  `tracking_id` VARCHAR(512) NOT NULL,
+  `cost` TEXT NULL,
+  `campaign` VARCHAR(255) NULL,
+  `zone` VARCHAR(100) NULL,
+  `ssp` VARCHAR(100) NULL,
+  `geo` CHAR(3) CHARACTER SET ascii COLLATE ascii_bin NULL,
+  `landing_url` TEXT NULL,
+  `captured_at` BIGINT UNSIGNED NOT NULL,
+  `last_seen_at` BIGINT UNSIGNED NOT NULL,
+  `expires_at` BIGINT UNSIGNED NOT NULL,
+  PRIMARY KEY (`client_id`),
+  KEY `idx_ppcmate_expires` (`expires_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `ppcmate_conversions` (
+  `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `dedupe_hash` CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  `client_id` VARCHAR(128) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  `tracking_id` VARCHAR(512) NOT NULL,
+  `event_key` VARCHAR(200) NOT NULL,
+  `value` VARCHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  `created_at` BIGINT UNSIGNED NOT NULL,
+  `sent_at` BIGINT UNSIGNED NULL,
+  `http_status` SMALLINT UNSIGNED NULL,
+  `response` TEXT NULL,
+  `legacy_source` VARCHAR(191) NULL,
+  `legacy_id` BIGINT UNSIGNED NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_ppcmate_conversions_dedupe_hash` (`dedupe_hash`),
+  UNIQUE KEY `uq_ppcmate_conversion_legacy` (`legacy_source`, `legacy_id`),
+  KEY `idx_ppcmate_conversions_client_id` (`client_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `legacy_sqlite_rows` (
+  `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `source_file` VARCHAR(191) NOT NULL,
+  `source_table` VARCHAR(191) NOT NULL,
+  `source_rowid` VARCHAR(191) NOT NULL,
+  `source_created_at` DATETIME NULL,
+  `row_json` LONGTEXT NOT NULL,
+  `imported_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_legacy_sqlite_row` (`source_file`, `source_table`, `source_rowid`),
+  KEY `idx_legacy_sqlite_created` (`source_created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `storage_migrations` (
+  `migration_key` VARCHAR(191) NOT NULL,
+  `source_kind` VARCHAR(40) NOT NULL,
+  `source_location` VARCHAR(512) NOT NULL,
+  `source_table` VARCHAR(191) NOT NULL DEFAULT '',
+  `source_sha256` CHAR(64) NOT NULL DEFAULT '',
+  `source_rows` BIGINT UNSIGNED NOT NULL DEFAULT 0,
+  `imported_rows` BIGINT UNSIGNED NOT NULL DEFAULT 0,
+  `completed_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `details_json` LONGTEXT NULL,
+  PRIMARY KEY (`migration_key`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

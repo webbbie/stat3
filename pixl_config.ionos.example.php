@@ -23,6 +23,31 @@ return array (
   'stats_urls' => 
   array (
   ),
+  'geoip' => 
+  array (
+    'enabled' => true,
+    'database_path' => 'data/geoip/dbip-country-lite.mmdb',
+    'pushover_country' => true,
+    'trust_proxy_headers' => false,
+  ),
+  'pushover' => 
+  array (
+    'enabled' => false,
+    'token' => '',
+    'user' => '',
+    'sound' => 'gamelan',
+    'priority' => 0,
+    'timeout' => 8,
+    'throttle_seconds' => 90,
+    'max_messages_per_hour' => 10,
+    'reading_score_only' => false,
+  ),
+  'captcha' => [
+    'enabled' => false,
+    'visitor_interval' => 100,
+    'success_target' => 10,
+    'max_duration_hours' => 4,
+  ],
   'public_key' => '',
   'hash_salt' => 'flfgldhlbfghyeokw8790521',
   'stats_password' => 'myadmno',
