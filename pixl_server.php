@@ -1,6 +1,50 @@
 <?php
 declare(strict_types=1);
 
+function pixl_stats_time_filter($rangeValue, int $days = 30): array
+{
+    $range = is_string($rangeValue) ? $rangeValue : '';
+    if ($range === '60s' || $range === '60m') {
+        $range = '60min';
+    }
+    $days = max(1, min(365, $days));
+    $ranges = [
+        '60min' => ['modifier' => '-60 minutes', 'label' => 'letzte 60 Minuten'],
+        '24h' => ['modifier' => '-24 hours', 'label' => 'letzte 24 Stunden'],
+        '1d' => ['modifier' => '', 'label' => 'heute seit 00:00 Uhr'],
+    ];
+    for ($rangeDays = 1; $rangeDays <= 7; $rangeDays++) {
+        $ranges['last' . $rangeDays . 'd'] = [
+            'modifier' => '-' . $rangeDays . ' days',
+            'label' => $rangeDays === 1 ? 'letzter 1 Tag' : 'letzte ' . $rangeDays . ' Tage',
+        ];
+    }
+
+    if (!isset($ranges[$range])) {
+        $range = '';
+    }
+
+    $label = $range === '' ? $days . ' Tage' : $ranges[$range]['label'];
+    if ($range === '1d') {
+        $since = (new DateTimeImmutable('now', new DateTimeZone('Europe/Berlin')))
+            ->setTime(0, 0, 0)
+            ->setTimezone(new DateTimeZone('UTC'))
+            ->format('Y-m-d H:i:s');
+    } else {
+        $modifier = $range === '' ? '-' . $days . ' days' : $ranges[$range]['modifier'];
+        $since = (new DateTimeImmutable('now', new DateTimeZone('UTC')))
+            ->modify($modifier)
+            ->format('Y-m-d H:i:s');
+    }
+
+    return [
+        'range' => $range,
+        'days' => $days,
+        'since' => $since,
+        'label' => $label,
+    ];
+}
+
 function pixl_config(): array
 {
     static $config = null;
@@ -20,6 +64,8 @@ function pixl_config(): array
 
     return $config;
 }
+
+require_once __DIR__ . '/pixl_geoip.php';
 
 function pixl_table_name(): string
 {
@@ -356,6 +402,62 @@ SQL;
     pixl_try_alter($pdo, "ALTER TABLE `$table` ADD KEY `bot_created` (`is_bot`, `bot_category`, `created_at`)");
 }
 
+/** Read and validate the complete create-only schema before executing any SQL. */
+function pixl_unified_schema_definitions(?string $path = null, ?string $eventTable = null): array
+{
+    $eventTable ??= pixl_table_name();
+    if (!preg_match('/^[A-Za-z0-9_]+$/', $eventTable)) {
+        throw new RuntimeException('Ungueltiger Tabellenname.');
+    }
+    $sql = @file_get_contents($path ?? __DIR__ . '/pixl_schema.sql');
+    if ($sql === false) throw new RuntimeException('pixl_schema.sql fehlt oder ist nicht lesbar.');
+    $sql = preg_replace('/^\s*--[^\r\n]*/m', '', $sql) ?? '';
+    $definitions = [];
+    $names = ['pixl_events', 'pixl_events_push_subscriptions', 'pixl_events_push_meta'];
+    $replacements = array_combine(
+        array_map(static fn(string $name): string => '`' . $name . '`', $names),
+        ['`' . $eventTable . '`', '`' . $eventTable . '_push_subscriptions`', '`' . $eventTable . '_push_meta`']
+    );
+    foreach (preg_split('/;\s*(?:\r?\n|$)/', $sql) ?: [] as $statement) {
+        $statement = trim(strtr($statement, $replacements));
+        if ($statement === '') continue;
+        if (str_contains($statement, ';')
+            || !preg_match('/\ACREATE TABLE IF NOT EXISTS `([A-Za-z0-9_]+)`\s*\(/', $statement, $match)
+            || isset($definitions[$match[1]])) {
+            throw new RuntimeException('Das zentrale Schema darf nur eindeutige CREATE TABLE IF NOT EXISTS-Anweisungen enthalten.');
+        }
+        $definitions[$match[1]] = $statement;
+    }
+    $expected = [
+        $eventTable, $eventTable . '_push_subscriptions', $eventTable . '_push_meta',
+        'pixl_captcha_state', 'pixl_captcha_visitors', 'pixl_captcha_stats', 'pixl_captcha_page_views',
+        'stat4_visitors', 'stat4_sessions', 'stat4_events', 'stat4_notifications',
+        'mind_geo_cache', 'mind_notifications', 'impressions',
+        'ppcmate_attributions', 'ppcmate_conversions', 'legacy_sqlite_rows', 'storage_migrations',
+    ];
+    if (count($definitions) !== count($expected) || array_diff($expected, array_keys($definitions))) {
+        throw new RuntimeException('pixl_schema.sql ist unvollstaendig oder passt nicht zu dieser Stats3-Version.');
+    }
+    return $definitions;
+}
+
+/** Add missing tables only; existing rows, schemas and legacy sources stay intact. */
+function pixl_ensure_unified_schema(PDO $pdo): array
+{
+    $definitions = pixl_unified_schema_definitions();
+    $tableSql = "SELECT TABLE_NAME FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE() AND TABLE_TYPE='BASE TABLE'";
+    $existing = $pdo->query($tableSql)->fetchAll(PDO::FETCH_COLUMN);
+    $created = [];
+    foreach ($definitions as $name => $statement) {
+        if (in_array($name, $existing, true)) continue;
+        $pdo->exec($statement);
+        $created[] = $name;
+    }
+    $missing = array_diff(array_keys($definitions), $pdo->query($tableSql)->fetchAll(PDO::FETCH_COLUMN));
+    if ($missing) throw new RuntimeException('Zentrale Tabellen fehlen weiterhin: ' . implode(', ', $missing));
+    return ['tables' => array_keys($definitions), 'created' => $created];
+}
+
 function pixl_try_alter(PDO $pdo, string $sql): void
 {
     try {
@@ -569,17 +671,7 @@ function pixl_parse_sent_at($value): ?string
 
 function pixl_remote_ip(): string
 {
-    foreach (['HTTP_CF_CONNECTING_IP', 'HTTP_X_FORWARDED_FOR', 'REMOTE_ADDR'] as $key) {
-        $raw = (string)($_SERVER[$key] ?? '');
-        if ($raw === '') {
-            continue;
-        }
-        $first = trim(explode(',', $raw)[0]);
-        if ($first !== '') {
-            return $first;
-        }
-    }
-    return '';
+    return pixl_geoip_client_ip($_SERVER);
 }
 
 function pixl_hash(string $value): string
@@ -708,6 +800,10 @@ function pixl_stats_safe_return_url($value): string
         'configurator.php',
         'reset_stats.php',
         'pixl_setup_check.php',
+        'comp.php',
+        'utm.php',
+        'live.php',
+        'export.php',
         'stat/index.php',
         'stat/dashboard.php',
         'stat/dashboardx2.html',
@@ -720,11 +816,12 @@ function pixl_stats_safe_return_url($value): string
     $queryValues = [];
     parse_str((string)($parts['query'] ?? ''), $queryValues);
     $query = [];
-    foreach (['days', 'limit', 'ar', 'bot', 'exclude_germans'] as $key) {
+    foreach (['days', 'range', 'limit', 'ar', 'bot', 'exclude_germans', 'top25', 'scope', 'q'] as $key) {
         if (isset($queryValues[$key]) && is_scalar($queryValues[$key])) {
             $query[$key] = substr((string)$queryValues[$key], 0, 40);
         }
     }
+    if ($path === 'live.php' && ($queryValues['view'] ?? '') === 'useragents') $query['view'] = 'useragents';
 
     return $path . ($query ? '?' . http_build_query($query) : '');
 }
@@ -749,6 +846,7 @@ function pixl_render_stats_login(bool $failed = false): void
     http_response_code(200);
     header('Content-Type: text/html; charset=utf-8');
     $days = htmlspecialchars((string)($_GET['days'] ?? '30'), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+    $range = htmlspecialchars((string)($_GET['range'] ?? ''), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
     $error = $failed ? '<p class="error">Passwort stimmt nicht.</p>' : '';
     echo <<<HTML
 <!doctype html>
@@ -773,6 +871,7 @@ function pixl_render_stats_login(bool $failed = false): void
     <h1>Pixl Statistik</h1>
     $error
     <input type="hidden" name="days" value="$days">
+    <input type="hidden" name="range" value="$range">
     <label for="stats_password">Passwort</label>
     <input id="stats_password" name="stats_password" type="password" autocomplete="current-password" autofocus required>
     <button type="submit">Einloggen</button>
@@ -826,8 +925,22 @@ function pixl_require_stats_auth(): void
                 header('Location: ' . $returnUrl);
                 exit;
             }
+            if (basename((string)parse_url($_SERVER['REQUEST_URI'] ?? '', PHP_URL_PATH)) === 'export.php') {
+                header('Location: export.php');
+                exit;
+            }
+            if (basename((string)parse_url($_SERVER['REQUEST_URI'] ?? '', PHP_URL_PATH)) === 'live.php'
+                && ($_GET['view'] ?? '') === 'useragents') {
+                $userAgentsReturn = 'live.php?' . http_build_query(array_intersect_key($_GET, ['view' => true, 'range' => true]));
+                header('Location: ' . pixl_stats_safe_return_url($userAgentsReturn));
+                exit;
+            }
             $days = max(1, min(365, (int)($_POST['days'] ?? 30)));
-            header('Location: ' . strtok((string)($_SERVER['REQUEST_URI'] ?? 'pixl_stats.php'), '?') . '?days=' . $days);
+            $range = (string)($_POST['range'] ?? '');
+            $rangeQuery = preg_match('/^(?:60min|24h|1d|last[1-7]d)$/', $range) === 1
+                ? '&range=' . rawurlencode($range)
+                : '';
+            header('Location: ' . strtok((string)($_SERVER['REQUEST_URI'] ?? 'pixl_stats.php'), '?') . '?days=' . $days . $rangeQuery);
             exit;
         }
         pixl_render_stats_login(true);
@@ -836,69 +949,513 @@ function pixl_require_stats_auth(): void
     pixl_render_stats_login(false);
 }
 
-function pixl_insert_event(PDO $pdo, array $payload): int
+function pixl_expand_message_payload(array $payload): array
 {
-    $table = pixl_table_name();
-    $siteKey = (string)pixl_get($payload, ['siteKey'], '');
-    $requiredKey = (string)(pixl_config()['public_key'] ?? '');
-    if ($requiredKey !== '' && !hash_equals($requiredKey, $siteKey)) {
-        pixl_json_response(['ok' => false, 'error' => 'bad_site_key'], 403);
+    $message = trim((string)pixl_get($payload, ['message'], ''));
+    if ($message === '') {
+        return $payload;
     }
 
-    $hostname = pixl_string(pixl_get($payload, ['page', 'hostname'], ''), 255);
-    if ($hostname !== '' && !pixl_allowed_host($hostname)) {
-        pixl_json_response(['ok' => false, 'error' => 'host_not_allowed'], 403);
-    }
-
-    $eventId = pixl_string(pixl_get($payload, ['eventId'], ''), 80);
-    if ($eventId === '') {
-        $eventId = bin2hex(random_bytes(16));
-    }
-
-    $userAgent = pixl_string(pixl_get($payload, ['context', 'userAgent'], $_SERVER['HTTP_USER_AGENT'] ?? ''), 0);
-    $bot = pixl_detect_bot($userAgent, $payload);
-    $ip = pixl_remote_ip();
-    $visitorHash = pixl_hash($ip . '|' . $userAgent);
-    $ipHash = pixl_hash($ip);
-    $pageUrl = pixl_string(pixl_get($payload, ['page', 'url'], ''), 0);
-    $pagePath = pixl_string(pixl_get($payload, ['page', 'path'], ''), 1024);
-    if ($pagePath === '' && $pageUrl !== '') {
-        $parsedPath = parse_url($pageUrl, PHP_URL_PATH);
-        $pagePath = is_string($parsedPath) && $parsedPath !== '' ? $parsedPath : '/';
-    }
-    $normalizedPagePath = parse_url($pagePath !== '' ? $pagePath : '/', PHP_URL_PATH);
-    $pagePath = is_string($normalizedPagePath) && $normalizedPagePath !== '' ? $normalizedPagePath : '/';
-
-    $pageRecountMinutes = pixl_nullable_int(pixl_get($payload, ['session', 'pageRecountMinutes']));
-    if ($pageRecountMinutes !== null && $pageRecountMinutes > 0 && $hostname !== '' && $visitorHash !== '') {
-        $pageRecountMinutes = max(1, min(1440, $pageRecountMinutes));
-        $pathExpression = pixl_sql_path_expression();
-        $sessionStmt = $pdo->prepare(
-            "SELECT `event_id` FROM `$table`
-             WHERE `visitor_hash` = :session_visitor_hash
-               AND LOWER(`hostname`) = :session_hostname
-               AND $pathExpression = :session_path
-               AND `created_at` >= UTC_TIMESTAMP() - INTERVAL $pageRecountMinutes MINUTE
-             ORDER BY `id` DESC
-             LIMIT 1"
-        );
-        $sessionStmt->execute([
-            ':session_visitor_hash' => $visitorHash,
-            ':session_hostname' => strtolower($hostname),
-            ':session_path' => $pagePath,
-        ]);
-        $existingEventId = $sessionStmt->fetchColumn();
-        if (is_string($existingEventId) && $existingEventId !== '') {
-            $eventId = $existingEventId;
-            $payload['eventId'] = $eventId;
-            if (!isset($payload['session']) || !is_array($payload['session'])) {
-                $payload['session'] = [];
-            }
-            $payload['session']['reused'] = true;
+    foreach (['context', 'engagement', 'health'] as $section) {
+        if (!isset($payload[$section]) || !is_array($payload[$section])) {
+            $payload[$section] = [];
         }
     }
 
-    $params = [
+    $lines = preg_split('/\R/u', $message) ?: [];
+    $values = [];
+    foreach ($lines as $line) {
+        if (preg_match('/^([A-Za-z][A-Za-z0-9 ]*):\s*(.*)$/u', trim((string)$line), $match)) {
+            $values[strtolower(trim($match[1]))] = trim($match[2]);
+        }
+    }
+
+    $setDefault = static function (array &$target, string $key, $value): void {
+        if ($value !== null && $value !== '' && (!array_key_exists($key, $target) || $target[$key] === '' || $target[$key] === null)) {
+            $target[$key] = $value;
+        }
+    };
+    $labelCode = static function (string $value): string {
+        return preg_match('/\(([A-Za-z]{2}(?:[-_][A-Za-z0-9]{2,8})*)\)\s*$/u', $value, $match)
+            ? str_replace('_', '-', $match[1])
+            : '';
+    };
+
+    if (isset($values['screen']) && preg_match('/^(\d+x\d+)\s*(?:\((OKAY|BAD)\))?/i', $values['screen'], $match)) {
+        $setDefault($payload['context'], 'screen', $match[1]);
+        if (!array_key_exists('knownResolution', $payload['context']) && isset($match[2])) {
+            $payload['context']['knownResolution'] = strtoupper($match[2]) === 'OKAY';
+        }
+    }
+    if (isset($values['iscreen']) && preg_match('/^(\d+x\d+)\s*(?:\((OKAY|BAD)\))?/i', $values['iscreen'], $match)) {
+        $setDefault($payload['context'], 'viewport', $match[1]);
+        if (!array_key_exists('knownViewport', $payload['context']) && isset($match[2])) {
+            $payload['context']['knownViewport'] = strtoupper($match[2]) === 'OKAY';
+        }
+    }
+    if (isset($values['lang'])) {
+        $language = $labelCode($values['lang']);
+        $setDefault($payload['context'], 'language', $language !== '' ? $language : $values['lang']);
+    }
+    if (isset($values['country'])) {
+        $country = $labelCode($values['country']);
+        $setDefault($payload['context'], 'country', $country !== '' ? strtoupper($country) : $values['country']);
+    }
+    foreach (['browser', 'os'] as $key) {
+        if (isset($values[$key])) {
+            $setDefault($payload['context'], $key, $values[$key]);
+        }
+    }
+    if (isset($values['device'])) {
+        $deviceParts = explode('/', $values['device'], 2);
+        $setDefault($payload['context'], 'device', trim($deviceParts[0]));
+        if (isset($deviceParts[1])) {
+            $setDefault($payload['context'], 'screenCategory', trim($deviceParts[1]));
+        }
+    }
+    if (isset($values['sessionduration']) && preg_match('/^(\d+)s$/i', $values['sessionduration'], $match)) {
+        $setDefault($payload['engagement'], 'sessionDuration', (int)$match[1]);
+    }
+    if (isset($values['reading']) && preg_match('/^([A-Za-z]+)(?:\s*\((\d+)s\))?/i', $values['reading'], $match)) {
+        $setDefault($payload['engagement'], 'readingLabel', strtoupper($match[1]));
+        if (isset($match[2])) {
+            $setDefault($payload['engagement'], 'readingSeconds', (int)$match[2]);
+        }
+    }
+    if (isset($values['readingscore']) && preg_match('/^-?\d+/', $values['readingscore'], $match)) {
+        $setDefault($payload['engagement'], 'readingScore', (int)$match[0]);
+    }
+    if (isset($values['v3userscore']) && is_numeric($values['v3userscore'])) {
+        $setDefault($payload['engagement'], 'v3UserScore', (float)$values['v3userscore']);
+    }
+    if (isset($values['render'])) {
+        $setDefault($payload['health'], 'renderStatus', $values['render']);
+    }
+
+    return $payload;
+}
+
+function pixl_notification_language_name(string $value): string
+{
+    $code = strtolower((string)preg_replace('/[-_].*$/', '', trim($value)));
+    $names = [
+        'ar' => 'Arabic', 'bg' => 'Bulgarian', 'cs' => 'Czech', 'da' => 'Danish',
+        'de' => 'German', 'el' => 'Greek', 'en' => 'English', 'es' => 'Spanish',
+        'et' => 'Estonian', 'fi' => 'Finnish', 'fr' => 'French', 'he' => 'Hebrew',
+        'hi' => 'Hindi', 'hr' => 'Croatian', 'hu' => 'Hungarian', 'id' => 'Indonesian',
+        'it' => 'Italian', 'ja' => 'Japanese', 'ko' => 'Korean', 'lt' => 'Lithuanian',
+        'lv' => 'Latvian', 'nl' => 'Dutch', 'no' => 'Norwegian', 'pl' => 'Polish',
+        'pt' => 'Portuguese', 'ro' => 'Romanian', 'ru' => 'Russian', 'sk' => 'Slovak',
+        'sl' => 'Slovenian', 'sr' => 'Serbian', 'sv' => 'Swedish', 'th' => 'Thai',
+        'tr' => 'Turkish', 'uk' => 'Ukrainian', 'ur' => 'Urdu', 'vi' => 'Vietnamese',
+        'zh' => 'Chinese',
+    ];
+    return $names[$code] ?? ($code !== '' ? $code : 'Unknown');
+}
+
+function pixl_notification_country_code(string $value): string
+{
+    $value = str_replace('_', '-', trim($value));
+    if (preg_match('/^[A-Za-z]{2}$/', $value)) {
+        return strtoupper($value);
+    }
+    $parts = explode('-', $value);
+    for ($index = count($parts) - 1; $index > 0; $index--) {
+        if (preg_match('/^[A-Za-z]{2}$/', $parts[$index])) {
+            return strtoupper($parts[$index]);
+        }
+    }
+    return '';
+}
+
+function pixl_country_code_from_locale_region(string $value): string
+{
+    $parts = preg_split('/[-_]/', trim($value)) ?: [];
+    foreach (array_slice($parts, 1) as $part) {
+        if (preg_match('/^[A-Za-z]{2}$/', $part)) {
+            return strtoupper($part);
+        }
+    }
+    return '';
+}
+
+function pixl_apply_country_geolocation(array $payload): array
+{
+    if (!isset($payload['context']) || !is_array($payload['context'])) {
+        $payload['context'] = [];
+    }
+
+    $browserCountry = pixl_notification_country_code(
+        pixl_string(pixl_get($payload, ['context', 'country'], ''), 40)
+    );
+    $payload['context']['countryBrowser'] = $browserCountry;
+
+    $localCountry = pixl_geoip_country_code(pixl_remote_ip());
+    if ($localCountry !== '') {
+        $payload['context']['country'] = $localCountry;
+        $payload['context']['countrySource'] = 'local_geoip';
+        $payload['context']['countryConfidence'] = 'hoch';
+        return $payload;
+    }
+
+    $ipCountry = pixl_geoip_trust_proxy_headers()
+        ? strtoupper(trim((string)($_SERVER['HTTP_CF_IPCOUNTRY'] ?? '')))
+        : '';
+    if (preg_match('/^[A-Z]{2}$/', $ipCountry) && !in_array($ipCountry, ['XX'], true)) {
+        $payload['context']['country'] = $ipCountry;
+        $payload['context']['countrySource'] = 'ip_geolocation';
+        $payload['context']['countryConfidence'] = 'hoch';
+        return $payload;
+    }
+
+    $country = $browserCountry;
+    $localeCountry = pixl_country_code_from_locale_region(
+        pixl_string(pixl_get($payload, ['context', 'language'], ''), 40)
+    );
+
+    if ($country === '' && $localeCountry !== '') {
+        $country = $localeCountry;
+    }
+
+    $payload['context']['country'] = $country;
+    $payload['context']['countrySource'] = $country !== '' ? 'browser' : 'unknown';
+    $payload['context']['countryConfidence'] = $country !== '' && $country === $localeCountry
+        ? 'mittel'
+        : 'niedrig';
+    return $payload;
+}
+
+function pixl_notification_country_name(string $code): string
+{
+    $code = strtoupper(trim($code));
+    if ($code === '') {
+        return 'Unknown';
+    }
+
+    // ICU kennt die vollstaendigen ISO-Laendernamen. Die statische Liste
+    // darunter bleibt als Rueckfall fuer Server ohne PHP-Intl erhalten.
+    if (class_exists('Locale')) {
+        $displayName = trim((string)Locale::getDisplayRegion('und_' . $code, 'en'));
+        if ($displayName !== '' && strcasecmp($displayName, 'Unknown Region') !== 0) {
+            return $displayName;
+        }
+    }
+
+    $names = [
+        'AT' => 'Austria', 'AU' => 'Australia', 'BE' => 'Belgium', 'BG' => 'Bulgaria',
+        'BR' => 'Brazil', 'CA' => 'Canada', 'CH' => 'Switzerland', 'CN' => 'China',
+        'CZ' => 'Czechia', 'DE' => 'Germany', 'DK' => 'Denmark', 'EE' => 'Estonia',
+        'ES' => 'Spain', 'FI' => 'Finland', 'FR' => 'France', 'GB' => 'United Kingdom',
+        'GR' => 'Greece', 'HR' => 'Croatia', 'HU' => 'Hungary', 'ID' => 'Indonesia',
+        'IE' => 'Ireland', 'IN' => 'India', 'IS' => 'Iceland', 'IT' => 'Italy',
+        'JP' => 'Japan', 'KR' => 'South Korea', 'LT' => 'Lithuania', 'LU' => 'Luxembourg',
+        'LV' => 'Latvia', 'MX' => 'Mexico', 'MY' => 'Malaysia', 'NL' => 'Netherlands',
+        'NO' => 'Norway', 'NZ' => 'New Zealand', 'PH' => 'Philippines', 'PK' => 'Pakistan',
+        'PL' => 'Poland', 'PT' => 'Portugal', 'RO' => 'Romania', 'RS' => 'Serbia',
+        'RU' => 'Russia', 'SE' => 'Sweden', 'SG' => 'Singapore', 'SI' => 'Slovenia',
+        'SK' => 'Slovakia', 'TH' => 'Thailand', 'TR' => 'Turkey', 'TW' => 'Taiwan',
+        'UA' => 'Ukraine', 'US' => 'United States', 'VN' => 'Vietnam', 'ZA' => 'South Africa',
+    ];
+    return $names[$code] ?? $code;
+}
+
+/**
+ * Interaction estimate, not proof of reading. Keep the raw input so a stored
+ * legacy payload can be processed again without normalizing its score twice.
+ */
+function pixl_notification_reading_score(array $payload): array
+{
+    $method = 'activity-v1';
+    $finiteNumber = static function ($value): ?float {
+        return is_numeric($value) && is_finite((float)$value) ? (float)$value : null;
+    };
+    $samples = pixl_get($payload, ['engagement', 'readingSamples']);
+    $raw = null;
+    if (is_array($samples)) {
+        // An empty sample list measures zero; malformed-only input is unknown.
+        $raw = $samples === [] ? 0.0 : null;
+        foreach (array_slice($samples, -50) as $sample) {
+            $value = $finiteNumber($sample);
+            if ($value !== null) {
+                $raw = ($raw ?? 0.0) + max(0.0, min(1000.0, $value));
+            }
+        }
+    }
+
+    if ($raw === null) {
+        if (pixl_get($payload, ['engagement', 'readingScoreMethod']) === $method) {
+            $raw = $finiteNumber(pixl_get($payload, ['engagement', 'readingScoreRaw']));
+        } else {
+            // pixl77.js, pixl6.js and expanded text messages send a score only.
+            $raw = $finiteNumber(pixl_get($payload, ['engagement', 'readingScore']));
+        }
+        if ($raw !== null) {
+            $raw = max(0.0, min(50000.0, $raw));
+        }
+    }
+
+    $score = null;
+    $label = 'no measurement';
+    if ($raw !== null) {
+        // Diminishing returns prevent raw mouse/scroll volume dominating.
+        $normalized = 100.0 * $raw / ($raw + 50.0);
+        $duration = $finiteNumber(pixl_get($payload, ['engagement', 'sessionDuration']));
+        if ($duration !== null && $duration >= 0.0) {
+            // Elapsed visit time is only a ceiling, never evidence of activity.
+            $ceiling = floor(100.0 * min(60.0, $duration) / 60.0);
+            $normalized = min($normalized, $ceiling);
+        }
+        $score = max(0, min(100, (int)round($normalized)));
+        $label = match (true) {
+            $raw === 0.0 => 'No activity',
+            $score < 25 => 'Low',
+            $score < 50 => 'Moderate',
+            $score < 75 => 'High',
+            default => 'Very high',
+        };
+    }
+
+    return ['score' => $score, 'raw' => $raw, 'label' => $label, 'method' => $method];
+}
+
+function pixl_server_build_notification(array $payload, array $bot): array
+{
+    $reason = strtoupper(pixl_string(pixl_get($payload, ['reason'], 'UNKNOWN'), 40));
+    $language = pixl_string(pixl_get($payload, ['context', 'language'], ''), 40);
+    $languageName = pixl_notification_language_name($language);
+    $languageLabel = strcasecmp($languageName, $language) === 0 || $language === ''
+        ? $languageName
+        : $languageName . ' (' . $language . ')';
+
+    $countryCode = pixl_notification_country_code(pixl_string(pixl_get($payload, ['context', 'country'], ''), 40));
+    if (!pixl_geoip_pushover_country_enabled()
+        && pixl_get($payload, ['context', 'countrySource'], '') === 'local_geoip') {
+        $countryCode = pixl_notification_country_code(
+            pixl_string(pixl_get($payload, ['context', 'countryBrowser'], ''), 40)
+        );
+        $localeCode = pixl_country_code_from_locale_region($language);
+        if ($countryCode === '' && $localeCode !== '') {
+            $countryCode = $localeCode;
+        }
+        $payload['context']['countryConfidence'] = $countryCode !== '' && $countryCode === $localeCode
+            ? 'mittel'
+            : 'niedrig';
+    }
+    $countryName = pixl_notification_country_name($countryCode);
+    $countryConfidence = strtolower(pixl_string(pixl_get($payload, ['context', 'countryConfidence'], 'niedrig'), 10));
+    if (!in_array($countryConfidence, ['niedrig', 'mittel', 'hoch'], true)) {
+        $countryConfidence = 'niedrig';
+    }
+    $countryLabel = $countryName . ' (' . $countryConfidence . ')';
+
+    $screen = pixl_string(pixl_get($payload, ['context', 'screen'], ''), 40);
+    $knownResolutions = [
+        '1920x1080', '1366x768', '1536x864', '1440x900', '1280x720',
+        '2560x1440', '3840x2160', '1680x1050', '1600x900', '1280x800',
+        '390x844', '393x873', '412x915', '375x812', '360x780',
+        '414x896', '428x926', '430x932', '360x800', '412x892',
+    ];
+    $configuredResolution = pixl_get($payload, ['context', 'knownResolution']);
+    $knownResolution = is_bool($configuredResolution)
+        ? $configuredResolution
+        : in_array($screen, $knownResolutions, true);
+    $inFrame = filter_var(pixl_get($payload, ['flags', 'inFrame'], false), FILTER_VALIDATE_BOOLEAN);
+
+    $title = implode(' - ', [
+        !empty($bot['is_bot']) ? 'Bot' : 'Visit',
+        $languageName,
+        $knownResolution ? 'OKAY' : 'BAD',
+        $inFrame ? 'Frame' : 'NoFrame',
+    ]);
+
+    $reached = pixl_get($payload, ['events', 'reached'], []);
+    $seconds = pixl_get($payload, ['events', 'seconds'], []);
+    $reached = is_array($reached) ? $reached : [];
+    $seconds = is_array($seconds) ? $seconds : [];
+    if (!empty($reached['READ'])) {
+        $readingLabel = 'READ';
+        $readingValue = $seconds['READ'] ?? null;
+    } elseif (!empty($reached['LEAVE'])) {
+        $readingLabel = 'LEAVE';
+        $readingValue = $seconds['LEAVE'] ?? null;
+    } else {
+        $readingLabel = $reason;
+        $readingValue = $seconds['VISIT'] ?? null;
+    }
+    $readingDisplay = is_numeric($readingValue)
+        ? $readingLabel . ' (' . max(0, (int)$readingValue) . 's)'
+        : $readingLabel;
+
+    $renderIssues = pixl_get($payload, ['health', 'renderIssues'], []);
+    $renderIssues = is_array($renderIssues)
+        ? array_values(array_filter(array_map(static fn($value): string => pixl_string($value, 160), $renderIssues)))
+        : [];
+    $render = $renderIssues ? implode('|', $renderIssues) : 'OK';
+    $path = pixl_string(pixl_get($payload, ['page', 'path'], '/'), 1024);
+    $sessionDuration = pixl_nullable_int(pixl_get($payload, ['engagement', 'sessionDuration'])) ?? 0;
+    $reading = pixl_notification_reading_score($payload);
+    $readingScore = $reading['score'];
+    $readingScoreDisplay = $readingScore === null ? 'n/a' : $readingScore . '/100';
+
+    $lines = [
+        'Screen: ' . ($screen !== '' ? $screen : 'Unknown') . ' (' . ($knownResolution ? 'OKAY' : 'BAD') . ')',
+        'iScreen: ' . pixl_string(pixl_get($payload, ['context', 'viewport'], 'Unknown'), 40),
+        'Lang: ' . $languageLabel,
+        'Country: ' . $countryLabel,
+        'Browser: ' . pixl_string(pixl_get($payload, ['context', 'browser'], 'Unknown'), 80),
+        'OS: ' . pixl_string(pixl_get($payload, ['context', 'os'], 'Unknown'), 80),
+        'Device: ' . pixl_string(pixl_get($payload, ['context', 'device'], 'Unknown'), 80)
+            . '/' . pixl_string(pixl_get($payload, ['context', 'screenCategory'], 'Unknown'), 40),
+        'Timezone: ' . pixl_string(pixl_get($payload, ['context', 'timezone'], 'Unknown'), 80),
+        'Path: ' . ($path !== '' ? $path : '/'),
+    ];
+    $lines[] = 'SessionDuration: ' . $sessionDuration . 's';
+    $lines[] = 'Reading: ' . $readingDisplay;
+    $lines[] = 'ReadingScore: ' . $readingScoreDisplay . ' (' . $reading['label'] . ')';
+    $lines[] = 'Render: ' . $render;
+
+    $v3Score = pixl_nullable_float(pixl_get($payload, ['engagement', 'v3UserScore']));
+    if ($v3Score !== null) {
+        $lines[] = 'v3UserScore: ' . number_format($v3Score, 2, '.', '');
+    }
+    if (!empty($bot['is_bot'])) {
+        $lines[] = 'Bot: ' . pixl_string($bot['name'] ?? 'Unknown', 120)
+            . ' / ' . pixl_string($bot['category'] ?? 'unknown', 80)
+            . ' / score ' . (int)($bot['score'] ?? 0);
+    }
+
+    $consoleErrors = pixl_get($payload, ['health', 'consoleErrors'], []);
+    if (is_array($consoleErrors) && $consoleErrors) {
+        $lines[] = '';
+        $lines[] = 'Console Errors (last 3):';
+        foreach (array_slice($consoleErrors, -3) as $entry) {
+            if (!is_array($entry)) {
+                continue;
+            }
+            $time = pixl_string($entry['time'] ?? '', 40);
+            $message = pixl_string($entry['message'] ?? '', 160);
+            if ($message !== '') {
+                $lines[] = '- [' . $time . '] ' . $message;
+            }
+        }
+    }
+
+    return [
+        'title' => $title,
+        'message' => implode("\n", $lines),
+        'known_resolution' => $knownResolution,
+        'reading_label' => $readingLabel,
+        'reading_seconds' => is_numeric($readingValue) ? max(0, (int)$readingValue) : null,
+        'reading_score' => $readingScore,
+        'reading_score_raw' => $reading['raw'],
+        'reading_score_method' => $reading['method'],
+        'render_status' => $render,
+    ];
+}
+
+/** A final summary may have a configured label while keeping its terminal event marker. */
+function pixl_event_is_final(array $payload): bool
+{
+    return strtoupper(pixl_string($payload['reason'] ?? '', 40)) === 'LEAVE'
+        || pixl_get($payload, ['events', 'reached', 'LEAVE']) === true;
+}
+
+function pixl_event_phase(array $payload): int
+{
+    if (pixl_event_is_final($payload)) return 3;
+    return in_array(strtoupper(pixl_string($payload['reason'] ?? '', 40)), ['READ', 'HIDDEN'], true)
+        || pixl_get($payload, ['events', 'reached', 'READ']) === true ? 2 : 1;
+}
+
+/** Use the original timestamp, since the database DATETIME rounds to whole seconds. */
+function pixl_event_timestamp(array $payload): ?float
+{
+    $value = $payload['sentAt'] ?? null;
+    if (!is_string($value) || trim($value) === '') return null;
+    try { return (float)(new DateTimeImmutable($value))->format('U.u'); }
+    catch (Throwable) { return null; }
+}
+
+function pixl_event_snapshot_is_newer(array $incoming, array $saved): bool
+{
+    $incomingTime = pixl_event_timestamp($incoming);
+    $savedTime = pixl_event_timestamp($saved);
+    if ($incomingTime !== null && $savedTime !== null && $incomingTime < $savedTime) return false;
+    $incomingPhase = pixl_event_phase($incoming);
+    $savedPhase = pixl_event_phase($saved);
+    $hasProgress = false;
+    // Legacy clients can send multiple checkpoints within the same second.
+    // Repeated snapshots must not trigger the notification dispatcher again.
+    foreach ([['engagement', 'sessionDuration'], ['engagement', 'readingScore'],
+        ['health', 'consoleErrorCount'], ['health', 'dialogErrorCount']] as $path) {
+        $next = pixl_get($incoming, $path);
+        $previous = pixl_get($saved, $path);
+        if (is_numeric($next) && (!is_numeric($previous) || (float)$next > (float)$previous)) $hasProgress = true;
+    }
+    // BFCache may produce another READ after LEAVE. Preserve the final phase,
+    // but accept new measured progress; a fresh VISIT cannot reopen that summary.
+    if ($incomingPhase < $savedPhase) return $incomingPhase >= 2 && $hasProgress;
+    if ($incomingPhase > $savedPhase) return true;
+    if ($incomingTime !== null && $savedTime !== null && $incomingTime > $savedTime) return true;
+    return $hasProgress;
+}
+
+/** A reload can reuse the page row; it must not erase progress already measured there. */
+function pixl_merge_event_progress(array $incoming, array $saved): array
+{
+    if (pixl_event_phase($incoming) < pixl_event_phase($saved)) $incoming['reason'] = $saved['reason'] ?? 'LEAVE';
+    foreach (['sessionDuration', 'readingSeconds', 'bestReadScore', 'bestReadDuration'] as $key) {
+        $old = pixl_get($saved, ['engagement', $key]);
+        $next = pixl_get($incoming, ['engagement', $key]);
+        if (is_numeric($old) && (!is_numeric($next) || (float)$old > (float)$next)) {
+            $incoming['engagement'][$key] = $old;
+        }
+    }
+    $oldScore = pixl_notification_reading_score($saved);
+    $newScore = pixl_notification_reading_score($incoming);
+    if ($oldScore['score'] !== null && ($newScore['score'] === null || $oldScore['score'] > $newScore['score'])) {
+        unset($incoming['engagement']['readingSamples']);
+        $incoming['engagement']['readingScore'] = $oldScore['score'];
+        $incoming['engagement']['readingScoreRaw'] = $oldScore['raw'];
+        $incoming['engagement']['readingScoreMethod'] = $oldScore['method'];
+    }
+    foreach (['VISIT', 'READ', 'LEAVE'] as $phase) {
+        if (pixl_get($saved, ['events', 'reached', $phase]) === true) $incoming['events']['reached'][$phase] = true;
+        $old = pixl_get($saved, ['events', 'seconds', $phase]);
+        $next = pixl_get($incoming, ['events', 'seconds', $phase]);
+        if (is_numeric($old) && (!is_numeric($next) || (float)$old > (float)$next)) $incoming['events']['seconds'][$phase] = $old;
+    }
+    return $incoming;
+}
+
+function pixl_finalize_event_payload(array $payload, array $bot): array
+{
+    $notification = pixl_server_build_notification($payload, $bot);
+    $payload['title'] = $notification['title'];
+    $payload['message'] = $notification['message'];
+    if (!isset($payload['context']) || !is_array($payload['context'])) {
+        $payload['context'] = [];
+    }
+    $payload['context']['knownResolution'] = $notification['known_resolution'];
+    if (!isset($payload['engagement']) || !is_array($payload['engagement'])) {
+        $payload['engagement'] = [];
+    }
+    $payload['engagement']['readingLabel'] = $notification['reading_label'];
+    $payload['engagement']['readingSeconds'] = $notification['reading_seconds'];
+    $payload['engagement']['readingScore'] = $notification['reading_score'];
+    $payload['engagement']['readingScoreRaw'] = $notification['reading_score_raw'];
+    $payload['engagement']['readingScoreMethod'] = $notification['reading_score_method'];
+    if (!isset($payload['health']) || !is_array($payload['health'])) {
+        $payload['health'] = [];
+    }
+    $payload['health']['renderStatus'] = $notification['render_status'];
+    return $payload;
+}
+
+function pixl_event_database_params(array $payload, array $bot, string $eventId, string $hostname,
+    string $pageUrl, string $pagePath, string $visitorHash, string $ipHash, string $userAgent): array
+{
+    return [
         ':event_id' => $eventId,
         ':sent_at' => pixl_parse_sent_at(pixl_get($payload, ['sentAt'])),
         ':site_id' => pixl_string(pixl_get($payload, ['siteId'], ''), 100),
@@ -940,31 +1497,117 @@ function pixl_insert_event(PDO $pdo, array $payload): int
         ':payload_json' => json_encode($payload, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE),
     ];
 
+}
+
+function pixl_insert_event(PDO $pdo, array $payload): int
+{
+    $payload = pixl_expand_message_payload($payload);
+    $payload = pixl_apply_country_geolocation($payload);
+    $table = pixl_table_name();
+    $siteKey = (string)pixl_get($payload, ['siteKey'], '');
+    $requiredKey = (string)(pixl_config()['public_key'] ?? '');
+    if ($requiredKey !== '' && !hash_equals($requiredKey, $siteKey)) {
+        pixl_json_response(['ok' => false, 'error' => 'bad_site_key'], 403);
+    }
+
+    $hostname = pixl_string(pixl_get($payload, ['page', 'hostname'], ''), 255);
+    if ($hostname !== '' && !pixl_allowed_host($hostname)) {
+        pixl_json_response(['ok' => false, 'error' => 'host_not_allowed'], 403);
+    }
+
+    $eventId = pixl_string(pixl_get($payload, ['eventId'], ''), 80);
+    if ($eventId === '') {
+        $eventId = bin2hex(random_bytes(16));
+    }
+
+    $userAgent = pixl_string(pixl_get($payload, ['context', 'userAgent'], $_SERVER['HTTP_USER_AGENT'] ?? ''), 0);
+    $bot = pixl_detect_bot($userAgent, $payload);
+    $payload = pixl_finalize_event_payload($payload, $bot);
+    $ip = pixl_remote_ip();
+    $visitorHash = pixl_hash($ip . '|' . $userAgent);
+    $ipHash = pixl_hash($ip);
+    $pageUrl = pixl_string(pixl_get($payload, ['page', 'url'], ''), 0);
+    $pagePath = pixl_string(pixl_get($payload, ['page', 'path'], ''), 1024);
+    if ($pagePath === '' && $pageUrl !== '') {
+        $parsedPath = parse_url($pageUrl, PHP_URL_PATH);
+        $pagePath = is_string($parsedPath) && $parsedPath !== '' ? $parsedPath : '/';
+    }
+    $normalizedPagePath = parse_url($pagePath !== '' ? $pagePath : '/', PHP_URL_PATH);
+    $pagePath = is_string($normalizedPagePath) && $normalizedPagePath !== '' ? $normalizedPagePath : '/';
+
+    $pageRecountMinutes = pixl_nullable_int(pixl_get($payload, ['session', 'pageRecountMinutes']));
+    if ($pageRecountMinutes !== null && $pageRecountMinutes > 0 && $hostname !== '' && $visitorHash !== '') {
+        $pageRecountMinutes = max(1, min(1440, $pageRecountMinutes));
+        $pathExpression = pixl_sql_path_expression();
+        $sessionStmt = $pdo->prepare(
+            "SELECT `event_id` FROM `$table`
+             WHERE `visitor_hash` = :session_visitor_hash
+               AND LOWER(`hostname`) = :session_hostname
+               AND $pathExpression = :session_path
+               AND `created_at` >= UTC_TIMESTAMP() - INTERVAL $pageRecountMinutes MINUTE
+             ORDER BY `id` DESC
+             LIMIT 1"
+        );
+        $sessionStmt->execute([
+            ':session_visitor_hash' => $visitorHash,
+            ':session_hostname' => strtolower($hostname),
+            ':session_path' => $pagePath,
+        ]);
+        $existingEventId = $sessionStmt->fetchColumn();
+        if (is_string($existingEventId) && $existingEventId !== '') {
+            $eventId = $existingEventId;
+            $payload['eventId'] = $eventId;
+            if (!isset($payload['session']) || !is_array($payload['session'])) {
+                $payload['session'] = [];
+            }
+            $payload['session']['reused'] = true;
+        }
+    }
+
+    $params = pixl_event_database_params($payload, $bot, $eventId, $hostname, $pageUrl, $pagePath, $visitorHash, $ipHash, $userAgent);
+
     $columns = array_map(static function (string $key): string {
         return substr($key, 1);
     }, array_keys($params));
     $updateColumns = array_values(array_filter($columns, static function (string $column): bool {
         return !in_array($column, ['event_id', 'visitor_hash', 'ip_hash'], true);
     }));
-    $updates = array_map(static function (string $column): string {
-        return sprintf('`%1$s` = VALUES(`%1$s`)', $column);
-    }, $updateColumns);
+    // The duplicate-key no-op acquires the row lock before comparing snapshots.
+    // Only the transaction that advances a summary returns its id for notification.
     $sql = sprintf(
-        'INSERT INTO `%s` (`%s`) VALUES (%s) ON DUPLICATE KEY UPDATE %s',
-        $table,
-        implode('`, `', $columns),
-        implode(', ', array_keys($params)),
-        implode(', ', $updates)
+        'INSERT INTO `%s` (`%s`) VALUES (%s) ON DUPLICATE KEY UPDATE `id` = `id`',
+        $table, implode('`, `', $columns), implode(', ', array_keys($params))
     );
-
-    $stmt = $pdo->prepare($sql);
-    $stmt->execute($params);
-
-    // Nur der erste VISIT erzeugt eine neue Zeile und darf Push ausloesen.
-    // READ und LEAVE aktualisieren dieselbe event_id und liefern deshalb 0.
-    if ($stmt->rowCount() !== 1) {
-        return 0;
+    $ownsTransaction = !$pdo->inTransaction();
+    if ($ownsTransaction) $pdo->beginTransaction();
+    try {
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute($params);
+        if ($stmt->rowCount() === 1) {
+            $id = (int)$pdo->lastInsertId();
+            if ($ownsTransaction) $pdo->commit();
+            return $id;
+        }
+        $savedStmt = $pdo->prepare("SELECT `id`, `payload_json` FROM `$table` WHERE `event_id` = :event_id FOR UPDATE");
+        $savedStmt->execute([':event_id' => $eventId]);
+        $row = $savedStmt->fetch(PDO::FETCH_ASSOC);
+        $saved = is_array($row) ? json_decode((string)$row['payload_json'], true) : null;
+        if (is_array($saved) && !pixl_event_snapshot_is_newer($payload, $saved)) {
+            if ($ownsTransaction) $pdo->commit();
+            return 0;
+        }
+        $notifyFinal = pixl_event_is_final($payload);
+        if (is_array($saved)) $payload = pixl_finalize_event_payload(pixl_merge_event_progress($payload, $saved), $bot);
+        $params = pixl_event_database_params($payload, $bot, $eventId, $hostname, $pageUrl, $pagePath, $visitorHash, $ipHash, $userAgent);
+        $updates = array_map(static fn(string $column): string => "`$column` = :$column", $updateColumns);
+        unset($params[':visitor_hash'], $params[':ip_hash']);
+        $stmt = $pdo->prepare("UPDATE `$table` SET " . implode(', ', $updates) . ' WHERE `event_id` = :event_id');
+        $stmt->execute($params);
+        $id = $notifyFinal ? (int)($row['id'] ?? 0) : 0;
+        if ($ownsTransaction) $pdo->commit();
+        return $id;
+    } catch (Throwable $error) {
+        if ($ownsTransaction && $pdo->inTransaction()) $pdo->rollBack();
+        throw $error;
     }
-
-    return (int)$pdo->lastInsertId();
 }
