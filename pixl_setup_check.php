@@ -25,7 +25,7 @@ $db = $config['db'] ?? [];
 $table = pixl_table_name();
 $pdoDrivers = extension_loaded('pdo') ? PDO::getAvailableDrivers() : [];
 
-$rows[] = pixl_check_row('PHP Version', version_compare(PHP_VERSION, '7.4.0', '>='), PHP_VERSION);
+$rows[] = pixl_check_row('PHP Version', version_compare(PHP_VERSION, '8.1.0', '>='), PHP_VERSION . ' · mindestens 8.1');
 $rows[] = pixl_check_row('PDO Extension', extension_loaded('pdo'), extension_loaded('pdo') ? 'loaded' : 'missing');
 $rows[] = pixl_check_row('PDO MySQL Driver', in_array('mysql', $pdoDrivers, true), $pdoDrivers ? implode(', ', $pdoDrivers) : 'no PDO drivers available');
 $rows[] = pixl_check_row('Config File', is_file(__DIR__ . '/pixl_config.php'), 'pixl_config.php');
@@ -34,6 +34,20 @@ $rows[] = pixl_check_row('Database Name', trim((string)($db['database'] ?? '')) 
 $rows[] = pixl_check_row('Database User', trim((string)($db['user'] ?? '')) !== '', (string)($db['user'] ?? 'missing'));
 $rows[] = pixl_check_row('Stats Password', trim((string)($config['stats_password'] ?? '')) !== '', trim((string)($config['stats_password'] ?? '')) !== '' ? 'set' : 'missing');
 $rows[] = pixl_check_row('Hash Salt', strlen((string)($config['hash_salt'] ?? '')) >= 24, 'length ' . strlen((string)($config['hash_salt'] ?? '')));
+$geoipStatus = pixl_geoip_database_status();
+$rows[] = pixl_check_row(
+    'Local DB-IP Reader',
+    !$geoipStatus['enabled'] || $geoipStatus['reader_ready'],
+    $geoipStatus['enabled'] ? ($geoipStatus['reader_ready'] ? 'MaxMind DB reader ready' : 'vendor/autoload.php missing; run composer install') : 'disabled'
+);
+$rows[] = pixl_check_row(
+    'Local DB-IP Country Database',
+    !$geoipStatus['enabled'] || $geoipStatus['database_ready'],
+    $geoipStatus['enabled']
+        ? ($geoipStatus['database_ready'] ? number_format((int)$geoipStatus['size'], 0, '.', ',') . ' bytes' : 'run php tools/update_geoip.php')
+        : 'disabled'
+);
+$rows[] = pixl_check_row('Trusted Proxy Headers', true, pixl_geoip_trust_proxy_headers() ? 'enabled; only safe behind a trusted reverse proxy' : 'disabled; REMOTE_ADDR is used');
 
 $dbOk = false;
 $dbDetail = '';
@@ -48,9 +62,25 @@ try {
 
     try {
         pixl_ensure_schema($pdo);
-        $count = (int)$pdo->query('SELECT COUNT(*) FROM `' . $table . '`')->fetchColumn();
-        $schemaOk = true;
-        $schemaDetail = 'table `' . $table . '` ok, rows ' . $count;
+        $unifiedSchema = pixl_ensure_unified_schema($pdo);
+        $expectedTables = $unifiedSchema['tables'];
+        $tableQuery = $pdo->prepare(
+            'SELECT TABLE_NAME FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE()'
+        );
+        $tableQuery->execute();
+        $existingTables = array_fill_keys($tableQuery->fetchAll(PDO::FETCH_COLUMN), true);
+        $missingTables = array_values(array_filter(
+            $expectedTables,
+            static fn(string $expected): bool => !isset($existingTables[$expected])
+        ));
+        $schemaOk = $missingTables === [];
+        $schemaDetail = $schemaOk
+            ? 'all ' . count($expectedTables) . ' central tables are present in `' . (string)($db['database'] ?? '') . '`'
+            : 'missing: ' . implode(', ', $missingTables) . '; follow docs/MYSQL-MIGRATION.md before importing existing data, or import pixl_schema.sql for a new installation';
+        if ($unifiedSchema['created']) {
+            $schemaDetail .= '; missing tables created: ' . implode(', ', $unifiedSchema['created']);
+        }
+        $schemaDetail .= '; table structure only, existing data imports are checked separately';
     } catch (Throwable $e) {
         $schemaDetail = $e->getMessage();
     }
@@ -59,7 +89,7 @@ try {
 }
 
 $rows[] = pixl_check_row('Database Connection', $dbOk, $dbDetail);
-$rows[] = pixl_check_row('Schema/Table', $schemaOk, $schemaDetail);
+$rows[] = pixl_check_row('Unified MySQL Schema', $schemaOk, $schemaDetail);
 
 $allOk = true;
 foreach ($rows as $row) {

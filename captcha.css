@@ -1,0 +1,22 @@
+/* Swipe CAPTCHA gate. Keep this asset beside captcha.js. */
+html.swipe-gate-locked,html.swipe-gate-locked body{overflow:hidden!important}
+#swipe-gate{position:fixed;inset:0;z-index:2147483647;display:grid;place-items:center;padding:20px;background:rgba(5,9,18,.82);backdrop-filter:blur(12px);font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#edf5ff}
+#swipe-gate *{box-sizing:border-box}
+.swipe-gate-card{width:min(100%,580px);padding:clamp(20px,5vw,34px);border:1px solid rgba(255,255,255,.16);border-radius:24px;background:linear-gradient(145deg,rgba(20,31,52,.98),rgba(8,15,28,.98));box-shadow:0 30px 90px rgba(0,0,0,.55)}
+.swipe-gate-card h2{margin:0 0 8px;font-size:clamp(1.35rem,4vw,1.8rem);line-height:1.2}
+.swipe-gate-card p{margin:0 0 20px;color:#aebdd1;line-height:1.5}
+#swipe-gate-canvas{display:block;width:100%;height:auto;aspect-ratio:2.08/1;border-radius:15px;background:#14233a;box-shadow:inset 0 0 0 1px rgba(255,255,255,.1)}
+.swipe-gate-range-wrap{position:relative;margin-top:18px;padding:7px;border-radius:999px;background:#101c2d;border:1px solid rgba(255,255,255,.12)}
+#swipe-gate-range{display:block;width:100%;height:44px;margin:0;appearance:none;-webkit-appearance:none;background:transparent;cursor:grab;touch-action:pan-y}
+#swipe-gate-range:active{cursor:grabbing}
+#swipe-gate-range::-webkit-slider-runnable-track{height:8px;border-radius:99px;background:linear-gradient(90deg,#2867e8,#56d5ff)}
+#swipe-gate-range::-moz-range-track{height:8px;border-radius:99px;background:linear-gradient(90deg,#2867e8,#56d5ff)}
+#swipe-gate-range::-webkit-slider-thumb{appearance:none;-webkit-appearance:none;width:42px;height:42px;margin-top:-17px;border:3px solid #fff;border-radius:50%;background:#1675ff;box-shadow:0 5px 18px rgba(0,0,0,.4)}
+#swipe-gate-range::-moz-range-thumb{width:38px;height:38px;border:3px solid #fff;border-radius:50%;background:#1675ff;box-shadow:0 5px 18px rgba(0,0,0,.4)}
+#swipe-gate-range:focus-visible{outline:3px solid #8fdfff;outline-offset:6px;border-radius:999px}
+#swipe-gate-summary{margin:14px 2px 0;font-size:.95rem;color:#c7d4e5;line-height:1.55}
+#swipe-gate-status{min-height:24px;margin:12px 2px 0;font-size:.95rem;color:#aebdd1}
+#swipe-gate-status.is-error{color:#ff9e9e}
+#swipe-gate-status.is-success{color:#75efb0}
+#swipe-gate.is-leaving{opacity:0;visibility:hidden;transition:opacity .32s ease,visibility .32s ease}
+@media (prefers-reduced-motion:reduce){#swipe-gate.is-leaving{transition:none}}

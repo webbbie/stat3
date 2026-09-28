@@ -26,6 +26,20 @@ function pixl_maybe_send_webpush(PDO $pdo, int $eventId): void
     }
 }
 
+function pixl_maybe_send_pushover(PDO $pdo, int $eventId): void
+{
+    if ($eventId <= 0) {
+        return;
+    }
+
+    try {
+        require_once __DIR__ . '/pixl_pushover.php';
+        pixl_pushover_notify_event($pdo, $eventId);
+    } catch (Throwable $e) {
+        error_log('pixl pushover failed: ' . $e->getMessage());
+    }
+}
+
 function pixl_pixel_payload(string $source): array
 {
     $url = (string)($_GET['url'] ?? '');
@@ -47,6 +61,7 @@ function pixl_pixel_payload(string $source): array
         'source' => $source,
         'eventId' => bin2hex(random_bytes(16)),
         'sentAt' => gmdate('c'),
+        'siteKey' => is_string($_GET['siteKey'] ?? null) ? $_GET['siteKey'] : '',
         'siteId' => (string)($config['site_id'] ?? ($host !== '' ? $host : 'pixl')),
         'reason' => $source === 'pixel' ? 'PIXEL' : 'DIRECT',
         'title' => $source === 'pixel' ? 'Server Pixel' : 'Direct Collector Request',
@@ -67,7 +82,7 @@ function pixl_pixel_payload(string $source): array
             'viewport' => '',
             'screenCategory' => '',
             'language' => (string)($_SERVER['HTTP_ACCEPT_LANGUAGE'] ?? ''),
-            'country' => (string)($_SERVER['HTTP_CF_IPCOUNTRY'] ?? ''),
+            'country' => pixl_geoip_trust_proxy_headers() ? (string)($_SERVER['HTTP_CF_IPCOUNTRY'] ?? '') : '',
             'timezone' => '',
         ],
         'engagement' => [
@@ -155,6 +170,7 @@ try {
     pixl_ensure_schema($pdo);
     $eventId = pixl_insert_event($pdo, $payload);
     pixl_maybe_send_webpush($pdo, $eventId);
+    pixl_maybe_send_pushover($pdo, $eventId);
     pixl_json_response(['ok' => true]);
 } catch (Throwable $e) {
     error_log('pixl_collect failed: ' . $e->getMessage());

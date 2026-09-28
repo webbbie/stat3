@@ -441,25 +441,76 @@ function pixel_push_client_line(array $row): string
     return $parts ? implode(' / ', $parts) : 'Unbekannt';
 }
 
-function pixel_push_event_payload(array $row): array
+function pixel_push_message_chunks(string $value, int $maxLength = 900): array
+{
+    $value = trim($value);
+    if ($value === '') {
+        return [''];
+    }
+
+    $chunks = [];
+    while ($value !== '') {
+        if (function_exists('mb_strlen') && function_exists('mb_substr')) {
+            if (mb_strlen($value, 'UTF-8') <= $maxLength) {
+                $chunks[] = $value;
+                break;
+            }
+            $chunks[] = mb_substr($value, 0, $maxLength, 'UTF-8');
+            $value = mb_substr($value, $maxLength, null, 'UTF-8');
+            continue;
+        }
+
+        if (strlen($value) <= $maxLength) {
+            $chunks[] = $value;
+            break;
+        }
+        $chunks[] = substr($value, 0, $maxLength);
+        $value = substr($value, $maxLength);
+    }
+
+    return $chunks;
+}
+
+function pixel_push_event_payloads(array $row): array
 {
     $id = (int)($row['id'] ?? 0);
-    $body = 'Pixel: ' . pixel_push_client_line($row) . "\n" . pixel_push_path_only($row);
+    $title = trim((string)($row['title'] ?? ''));
+    $body = trim((string)($row['message'] ?? ''));
 
-    return [
-        'title' => 'Pixel #' . $id,
-        'body' => pixl_string($body, 700),
-        'tag' => 'pixl-event-' . $id,
-        'url' => pixel_push_absolute_url('pixel_stats2.php'),
-        'eventId' => $id,
-        'createdAt' => (string)($row['created_at'] ?? ''),
-    ];
+    if ($title === '') {
+        $title = 'Pixel #' . $id;
+    }
+    if ($body === '') {
+        $body = 'Pixel: ' . pixel_push_client_line($row) . "\n" . pixel_push_path_only($row);
+    }
+
+    $chunks = pixel_push_message_chunks($body);
+    $chunkCount = count($chunks);
+    $payloads = [];
+    foreach ($chunks as $index => $chunk) {
+        $partNumber = $index + 1;
+        $payloads[] = [
+            'title' => pixl_string($title . ($chunkCount > 1 ? ' (' . $partNumber . '/' . $chunkCount . ')' : ''), 250),
+            'body' => $chunk,
+            'tag' => 'pixl-event-' . $id . ($chunkCount > 1 ? '-part-' . $partNumber : ''),
+            'url' => pixel_push_absolute_url('pixel_stats2.php'),
+            'eventId' => $id,
+            'createdAt' => (string)($row['created_at'] ?? ''),
+        ];
+    }
+    return $payloads;
+}
+
+function pixel_push_event_payload(array $row): array
+{
+    $payloads = pixel_push_event_payloads($row);
+    return $payloads[0];
 }
 
 function pixel_push_fetch_event(PDO $pdo, int $eventId): ?array
 {
     $table = pixl_table_name();
-    $stmt = $pdo->prepare("SELECT id, created_at, reason, title, hostname, page_url, path, browser, os, device,
+    $stmt = $pdo->prepare("SELECT id, created_at, reason, title, message, hostname, page_url, path, browser, os, device,
             country, session_duration, is_bot, bot_score, bot_name
         FROM `$table`
         WHERE id = :id
@@ -533,7 +584,9 @@ function pixel_push_notify_event(PDO $pdo, int $eventId): void
         if (!$row || !pixl_event_matches_configured_stats_url($row)) {
             return;
         }
-        pixel_push_send_payload_to_all($pdo, pixel_push_event_payload($row));
+        foreach (pixel_push_event_payloads($row) as $payload) {
+            pixel_push_send_payload_to_all($pdo, $payload);
+        }
     } catch (Throwable $e) {
         error_log('pixel_push_notify_event failed: ' . $e->getMessage());
     }

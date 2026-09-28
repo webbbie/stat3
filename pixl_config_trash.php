@@ -24,12 +24,17 @@ return array (
   ),
   'public_key' => '',
   'hash_salt' => 'flfgldhlbfghyeokw8790521',
-  'stats_password' => '$2y$12$.YAtFtVBJXO4kBEk0diq2uAktbD1pD0k.AFc69NSh15uyTHrm.yky',
+  'stats_password' => 'myadmnoX',
   'stats_cookie_name' => 'pixl_stats_login',
   'stats_auto_login_days' => 30,
   'stats_urls' => 
   array (
     0 => 'https://www.inconsequential.org/files/0021/home.html',
+    1 => 'https://www.inconsequential.org/files/0021/intro/basic/indexs.html',
+    2 => 'https://www.inconsequential.org/files/0021/intro/basic/box.html',
+    3 => 'https://www.inconsequential.org/files/0021/intro/basic/built.html',
+    4 => 'https://www.inconsequential.org/files/0021/intro/basic/free.html',
+    5 => 'https://www.inconsequential.org/files/0021/so03d6.html',
   ),
   'geoip' => 
   array (
@@ -46,15 +51,6 @@ return array (
     'sound' => 'cashregister',
     'priority' => 0,
     'timeout' => 8,
-    'throttle_seconds' => 150,
-    'max_messages_per_hour' => 60,
-    'reading_score_only' => false,
-  ),
-  'captcha' => 
-  array (
-    'enabled' => true,
-    'visitor_interval' => 250,
-    'success_target' => 2,
-    'revision' => 'a67c35b32448fe12ac3cb4a45f23ebef',
+    'throttle_seconds' => 90,
   ),
 );
