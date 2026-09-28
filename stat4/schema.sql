@@ -1,0 +1,80 @@
+CREATE TABLE IF NOT EXISTS stat4_visitors (
+  visitor_hash CHAR(64) PRIMARY KEY,
+  first_seen DATETIME NOT NULL,
+  last_seen DATETIME NOT NULL,
+  first_ip_hash CHAR(64) NOT NULL,
+  first_ip_prefix VARCHAR(64) NOT NULL DEFAULT '',
+  last_ip_prefix VARCHAR(64) NOT NULL DEFAULT '',
+  is_bot TINYINT(1) NOT NULL DEFAULT 0,
+  INDEX idx_visitors_seen (last_seen),
+  INDEX idx_visitors_first (first_seen)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS stat4_sessions (
+  session_id CHAR(36) PRIMARY KEY,
+  visitor_hash CHAR(64) NOT NULL,
+  started_at DATETIME NOT NULL,
+  last_seen DATETIME NOT NULL,
+  pageviews INT UNSIGNED NOT NULL DEFAULT 0,
+  clicks INT UNSIGNED NOT NULL DEFAULT 0,
+  active_seconds INT UNSIGNED NOT NULL DEFAULT 0,
+  max_level TINYINT UNSIGNED NOT NULL DEFAULT 0,
+  is_bounce TINYINT(1) NOT NULL DEFAULT 1,
+  is_bot TINYINT(1) NOT NULL DEFAULT 0,
+  referrer VARCHAR(2048) NOT NULL DEFAULT '',
+  utm_source VARCHAR(191) NOT NULL DEFAULT '',
+  utm_medium VARCHAR(191) NOT NULL DEFAULT '',
+  utm_campaign VARCHAR(191) NOT NULL DEFAULT '',
+  utm_term VARCHAR(191) NOT NULL DEFAULT '',
+  utm_content VARCHAR(191) NOT NULL DEFAULT '',
+  INDEX idx_sessions_started (started_at),
+  INDEX idx_sessions_visitor (visitor_hash),
+  CONSTRAINT fk_stat4_session_visitor FOREIGN KEY (visitor_hash) REFERENCES stat4_visitors(visitor_hash) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS stat4_events (
+  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  event_uuid CHAR(36) NOT NULL,
+  session_id CHAR(36) NOT NULL,
+  visitor_hash CHAR(64) NOT NULL,
+  occurred_at DATETIME NOT NULL,
+  event_type ENUM('pageview','click','heartbeat','leave') NOT NULL,
+  hostname VARCHAR(255) NOT NULL DEFAULT '',
+  path VARCHAR(2048) NOT NULL DEFAULT '/',
+  page_url TEXT NULL,
+  title VARCHAR(512) NOT NULL DEFAULT '',
+  referrer VARCHAR(2048) NOT NULL DEFAULT '',
+  target VARCHAR(2048) NOT NULL DEFAULT '',
+  screen_size VARCHAR(32) NOT NULL DEFAULT '',
+  inner_size VARCHAR(32) NOT NULL DEFAULT '',
+  language VARCHAR(32) NOT NULL DEFAULT '',
+  country VARCHAR(8) NOT NULL DEFAULT '',
+  browser VARCHAR(64) NOT NULL DEFAULT '',
+  browser_version VARCHAR(32) NOT NULL DEFAULT '',
+  os VARCHAR(64) NOT NULL DEFAULT '',
+  os_version VARCHAR(32) NOT NULL DEFAULT '',
+  device VARCHAR(32) NOT NULL DEFAULT '',
+  user_agent VARCHAR(1024) NOT NULL DEFAULT '',
+  level TINYINT UNSIGNED NOT NULL DEFAULT 0,
+  active_seconds SMALLINT UNSIGNED NOT NULL DEFAULT 0,
+  ok TINYINT(1) NOT NULL DEFAULT 1,
+  UNIQUE KEY uq_stat4_event_uuid (event_uuid),
+  INDEX idx_events_time (occurred_at),
+  INDEX idx_events_session (session_id),
+  INDEX idx_events_visitor (visitor_hash),
+  INDEX idx_events_type_time (event_type, occurred_at),
+  CONSTRAINT fk_stat4_event_session FOREIGN KEY (session_id) REFERENCES stat4_sessions(session_id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS stat4_notifications (
+  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  visitor_hash CHAR(64) NOT NULL,
+  pageview_milestone INT UNSIGNED NOT NULL,
+  status ENUM('pending','sent','failed') NOT NULL DEFAULT 'pending',
+  response_text VARCHAR(1000) NOT NULL DEFAULT '',
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  sent_at DATETIME NULL,
+  UNIQUE KEY uq_stat4_notification_milestone (visitor_hash, pageview_milestone),
+  INDEX idx_stat4_notification_status (status, created_at),
+  CONSTRAINT fk_stat4_notification_visitor FOREIGN KEY (visitor_hash) REFERENCES stat4_visitors(visitor_hash) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

@@ -1,5 +1,9 @@
 # Installation
 
+Requirements: PHP 8.1 or newer and PDO MySQL; importing old SQLite sources additionally requires PDO SQLite in the CLI PHP installation.
+
+This setup order is for a new installation. Before changing an existing installation, follow [MySQL migration](MYSQL-MIGRATION.md): back up the source, target, and configuration, pause the old and newly routed writers, and preserve production secrets during deployment.
+
 ## 1. Upload Files
 
 Upload these files to the same folder on your PHP webspace:
@@ -8,18 +12,33 @@ Upload these files to the same folder on your PHP webspace:
 pixl77.js
 pixl_collect.php
 pixl_server.php
+pixl_schema.sql
 pixl_stats.php
 pixl_setup_check.php
 pixl_config.example.php
+pixl_geoip.php
+composer.json
+composer.lock
+tools/update_geoip.php
+tools/migrate_storage_to_mysql.php
 ```
 
 For IONOS, prefer `pixl_config.ionos.example.php` and read `docs/IONOS.md`.
 
-On the server, copy:
+For a new installation only, copy:
 
 ```text
 pixl_config.example.php -> pixl_config.php
 ```
+
+Install the MMDB reader and download the current local country database:
+
+```bash
+composer install --no-dev --optimize-autoloader
+php tools/update_geoip.php
+```
+
+Repeat the second command monthly. DB-IP Country Lite covers IPv4 and IPv6 and requires the visible attribution link included in the dashboards.
 
 ## 2. Configure MySQL
 
@@ -36,6 +55,8 @@ Edit `pixl_config.php`:
 ```
 
 On IONOS, use the database host shown in the Control Center. It is often not `localhost`; it may look similar to `db5012345678.hosting-data.io`.
+
+This one `db` configuration is shared by Stats3, STAT4, Mind, the impression collector, and PPCMate. All active tables must live in this same database. Do not add a separate production database or another writable SQLite configuration for an individual module.
 
 Set your site identity and allowed hosts:
 
@@ -56,7 +77,13 @@ Set a random salt and dashboard password:
 
 `stats_password` may also be a `password_hash()` value.
 
-## 3. Configure the JavaScript Endpoint
+## 3. Migrate Existing Storage
+
+For a new installation, import the complete `pixl_schema.sql` into the configured central database before enabling collectors.
+
+For existing data, use the [canonical migration procedure](MYSQL-MIGRATION.md). A STAT4 import requires `--commit --confirm-stat4-cutover` after the write pause. `--skip-stat4` omits the old source and does not confirm a completed STAT4 migration. An old PPCMate SQLite source must be supplied explicitly with `--ppcmate-db`. Keep every source backup unchanged.
+
+## 4. Configure the JavaScript Endpoint
 
 Open `pixl77.js`.
 
@@ -69,7 +96,7 @@ SQL_SITE_ID: "example.com",
 
 If you use `SQL_PUBLIC_KEY`, set the same value in `pixl_config.php`.
 
-## 4. Include the Tracker
+## 5. Include the Tracker
 
 Add this to your pages:
 
@@ -107,7 +134,7 @@ Optional no-JS pixel:
 </noscript>
 ```
 
-## 5. Open the Dashboard
+## 6. Open the Dashboard
 
 Go to:
 
@@ -117,7 +144,11 @@ https://example.com/stats3/pixl_stats.php
 
 Log in with `stats_password`.
 
-The dashboard auto-creates and auto-upgrades the MySQL table.
+Individual dashboards and collectors create or update their supported runtime tables. The authenticated `pixl_setup_check.php` and `stat4/systemcheck.php` also initialize missing tables from the complete `pixl_schema.sql` and verify all 17 central tables. Existing tables and data are preserved by this create-only step. Use the migration procedure to import and verify historical data.
+
+Setup regression checks: `composer test-setup`. Set `PIXL_SETUP_TEST_DSN` to an
+empty disposable `pixl_setup_test_*` MySQL database to also reproduce and repair
+the nine missing module tables, verify existing data, and check repeatability.
 
 Before opening the dashboard on IONOS, you can run:
 
@@ -125,9 +156,9 @@ Before opening the dashboard on IONOS, you can run:
 https://www.bayerchristian.de/stats3/pixl_setup_check.php
 ```
 
-This checks PHP, PDO MySQL, the database connection, and table creation.
+This checks PHP, PDO MySQL, the database connection, and whether all central tables are present. It may update Stats3 runtime tables, but it neither imports legacy data nor initializes every module's tables.
 
-## 6. Enable Browser Notifications
+## 7. Enable Browser Notifications
 
 In `pixl_stats.php`, click:
 
@@ -140,6 +171,7 @@ The browser permission prompt appears. After approval, the dashboard checks for 
 ## Troubleshooting
 
 - Blank dashboard: check `pixl_config.php` database credentials.
+- Missing STAT4, Mind, Impression, or PPCMate data: confirm that every module uses the central `pixl_config.php` connection and run the migration preview.
 - No browser notifications: use HTTPS and keep `pixl_stats.php` open.
 - No events: confirm `SQL_ENDPOINT` points to the uploaded collector.
 - 403 collector response: check `allowed_hosts` and optional `public_key`.
